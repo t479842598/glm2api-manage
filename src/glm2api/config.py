@@ -5,6 +5,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .model_variants import expand_model_variants
+
 
 DEFAULT_ASSISTANT_ID = "65940acff94777010aa6b796"
 DEFAULT_IMAGE_ASSISTANT_ID = "65a232c082ff90a2ad2f15e2"
@@ -34,6 +36,10 @@ BUILTIN_EXPOSED_MODELS = (
     "glm-deep-research",
     DEFAULT_IMAGE_MODEL_NAME,
 )
+MODEL_VARIANT_EXCLUDED_MODELS = {
+    "cogView-4-250304",
+    DEFAULT_IMAGE_MODEL_NAME,
+}
 BUILTIN_MODEL_ALIASES = {name: name for name in BUILTIN_EXPOSED_MODELS}
 
 
@@ -223,7 +229,10 @@ def load_config(env_file: str = ".env") -> AppConfig:
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         log_level = "INFO"
     image_model_name = DEFAULT_IMAGE_MODEL_NAME
-    exposed_models = list(BUILTIN_EXPOSED_MODELS)
+    exposed_models = expand_model_variants(
+        BUILTIN_EXPOSED_MODELS,
+        excluded_models=MODEL_VARIANT_EXCLUDED_MODELS,
+    )
     model_aliases = dict(BUILTIN_MODEL_ALIASES)
 
     config = AppConfig(

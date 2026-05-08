@@ -10,6 +10,7 @@ from logging import Logger
 
 from ..config import AppConfig
 from ..logging_utils import debug_dump
+from ..model_variants import model_requests_search, model_requests_thinking, split_model_features
 from ..utils.tool_parser import StreamingToolParser, parse_tool_calls_from_text
 
 
@@ -33,7 +34,7 @@ CANONICAL_TOOL_CALL_EXAMPLE = "\n".join(
         "</ml_tool_calls>",
     ]
 )
-SERVER_SIDE_TOOL_NAMES = {
+BLOCKED_NATIVE_TOOL_NAMES = {
     "open_url",
     "open_ul",
     "browser.open",
@@ -44,6 +45,7 @@ SERVER_SIDE_TOOL_NAMES = {
     "browse",
     "open_link",
 }
+SERVER_SIDE_TOOL_NAMES: set[str] = set()
 
 
 def normalize_tool_name(name: object) -> str:
@@ -287,6 +289,8 @@ def build_tool_call_instructions(
         "# TOOL USE PROTOCOL",
         "The following tool schemas are the only executable tool definitions for this turn.",
         "Ignore any tool names that are not listed below, even if they appear in prior context or model memory.",
+        "You are connected through an OpenAI-compatible proxy. You do not have hidden browser, web, or URL-opening tools.",
+        "Never call native tools such as `open_url`, `web.search`, `web.run`, `browser.open`, `browse`, or `open_link`.",
     ]
 
     if server_tools:
@@ -306,6 +310,7 @@ def build_tool_call_instructions(
             [
                 "",
                 f"XML-based tools (parsed by this server): {available_xml_names}.",
+                "Only these XML-based tools are available. Use their exact names and exact parameter fields from the schemas.",
                 "If an XML-based tool is needed, output executable XML only. Do not add prose in the same assistant answer.",
                 "Use the private ml-prefixed canonical format below exactly.",
                 CANONICAL_TOOL_CALL_EXAMPLE,
@@ -324,6 +329,7 @@ def build_tool_call_instructions(
             "",
             "Rules:",
             "- Do not invent tool names outside the declared list.",
+            "- If a URL, browsing, or search action is needed, use only an explicitly listed client tool. If none is listed, explain that no such tool is available.",
             "- For XML-based tools, do not emit OpenAI JSON tool_calls arrays, function_call objects, or any non-XML tool syntax.",
             "- For XML-based tools, do not use <tool_calls>, <tool_call>, <tool_name>, <parameters>, <function_call>, <tool_use>, <invoke>, or any legacy wrapper.",
             "- Do not place raw JSON directly inside <ml_parameters>.",
@@ -404,6 +410,7 @@ def convert_messages(
     tool_choice: object | None = None,
     server_side_tool_names: set[str] | None = None,
 ) -> list[dict[str, object]]:
+    tools = filter_tools(tools, blocked_tool_names or set())
     available_tool_names = {
         str(tool.get("function", {}).get("name", "")).strip()
         for tool in (tools or [])
@@ -433,9 +440,12 @@ def convert_messages(
             )
             for tool_call in sanitized_tool_calls:
                 function = tool_call.get("function", {})
+                tool_name = str(function.get("name", "unknown"))
+                if available_tool_names and tool_name not in available_tool_names:
+                    continue
                 tool_blocks.append(
                     serialize_tool_call_block(
-                        name=str(function.get("name", "unknown")),
+                        name=tool_name,
                         arguments=function.get("arguments", "{}"),
                     )
                 )
@@ -498,7 +508,8 @@ def convert_messages(
 
 
 def resolve_upstream_model(requested_model: str, config: AppConfig) -> tuple[str, str]:
-    upstream_model = config.model_aliases.get(requested_model, requested_model)
+    base_model, _ = split_model_features(requested_model)
+    upstream_model = config.model_aliases.get(base_model, base_model)
     assistant_id = upstream_model if ASSISTANT_ID_PATTERN.fullmatch(upstream_model) else config.glm_assistant_id
     return upstream_model, assistant_id
 
@@ -507,9 +518,13 @@ def resolve_chat_mode(model: str, reasoning_effort: object, deep_research: objec
     lower_model = (model or "").lower()
     if deep_research or "deepresearch" in lower_model or "deep-research" in lower_model:
         return "deep_research"
-    if reasoning_effort or "think" in lower_model or "zero" in lower_model:
+    if reasoning_effort or model_requests_thinking(model) or "think" in lower_model or "zero" in lower_model:
         return "zero"
     return ""
+
+
+def resolve_networking(model: str, web_search: object) -> bool:
+    return bool(web_search) or model_requests_search(model)
 
 
 @dataclass
@@ -563,6 +578,8 @@ class GLMEventAccumulator:
                             tool_name = str(tool_calls_data.get("name", "")).strip()
                             tool_id = str(tool_calls_data.get("id", "")).strip()
                             arguments = tool_calls_data.get("arguments", "{}")
+                            if self.allowed_tool_names is not None and tool_name not in self.allowed_tool_names:
+                                continue
                             if tool_name and tool_id and tool_id not in self._server_side_tool_call_ids:
                                 self._server_side_tool_call_ids.add(tool_id)
                                 self._server_side_tool_calls.append(

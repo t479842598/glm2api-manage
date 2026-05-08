@@ -22,7 +22,17 @@ from typing import Callable
 from ..config import AppConfig
 from ..logging_utils import debug_dump
 from .glm_auth import GLMAccessTokenManager, build_sign
-from .translator import GLMEventAccumulator, SERVER_SIDE_TOOL_NAMES, convert_messages, extract_recent_user_url, filter_tools, resolve_chat_mode, resolve_upstream_model
+from .translator import (
+    BLOCKED_NATIVE_TOOL_NAMES,
+    GLMEventAccumulator,
+    SERVER_SIDE_TOOL_NAMES,
+    convert_messages,
+    extract_recent_user_url,
+    filter_tools,
+    resolve_chat_mode,
+    resolve_networking,
+    resolve_upstream_model,
+)
 
 
 FILE_UPLOAD_URL_SUFFIX = "/backend-api/assistant/file_upload"
@@ -121,7 +131,11 @@ class GLMWebClient:
 
     def _resolve_tools(self, openai_payload: dict[str, object]) -> tuple[list[dict[str, object]] | None, set[str] | None]:
         raw_tools = list(openai_payload.get("tools", [])) if isinstance(openai_payload.get("tools"), list) else None # type: ignore
-        blocked_tool_names = {name.strip() for name in self.config.blocked_tool_names if name.strip()}
+        blocked_tool_names = {
+            name.strip()
+            for name in self.config.blocked_tool_names
+            if name.strip()
+        } | BLOCKED_NATIVE_TOOL_NAMES
         filtered_tools = filter_tools(raw_tools, blocked_tool_names)
         if raw_tools and len(raw_tools) != len(filtered_tools or []):
             blocked_names: list[str] = []
@@ -356,9 +370,13 @@ class GLMWebClient:
             debug_dump(self.logger, self.config.debug_dump_all, "附加上传引用后的 GLM messages", converted_messages)
 
         chat_mode = resolve_chat_mode(
-            model=upstream_model,
+            model=requested_model,
             reasoning_effort=openai_payload.get("reasoning_effort"),
             deep_research=openai_payload.get("deep_research"),
+        )
+        is_networking = resolve_networking(
+            model=requested_model,
+            web_search=openai_payload.get("web_search"),
         )
 
         request_body = json.dumps(
@@ -370,11 +388,11 @@ class GLMWebClient:
                 "messages": converted_messages,
                 "meta_data": {
                     "channel": "",
-                    "chat_mode": chat_mode or None,
+                    "chat_mode": chat_mode,
                     "draft_id": "",
                     "if_plus_model": True,
-                    "input_question_type": "openai_compatible",
-                    "is_networking": bool(openai_payload.get("web_search")),
+                    "input_question_type": "xxxx",
+                    "is_networking": is_networking,
                     "is_test": False,
                     "platform": "pc",
                     "quote_log_id": "",

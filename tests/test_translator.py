@@ -1,4 +1,4 @@
-from glm2api.services.translator import GLMEventAccumulator, convert_messages
+from glm2api.services.translator import BLOCKED_NATIVE_TOOL_NAMES, GLMEventAccumulator, convert_messages
 
 
 def test_convert_messages_injects_xml_tool_prompt_and_history():
@@ -118,6 +118,74 @@ def test_convert_messages_respects_tool_choice_none_and_specific():
     assert "You must call exactly `get_weather` before giving a final answer." in specific_prompt
 
 
+def test_convert_messages_filters_native_url_tools_and_reinforces_tool_awareness():
+    converted = convert_messages(
+        messages=[{"role": "user", "content": "打开 https://example.com"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "open_url",
+                    "description": "Open URL",
+                    "parameters": {"type": "object"},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__CherryFetch__fetchJson",
+                    "description": "Fetch JSON",
+                    "parameters": {"type": "object"},
+                },
+            },
+        ],
+        blocked_tool_names=BLOCKED_NATIVE_TOOL_NAMES,
+    )
+
+    prompt = converted[0]["content"][0]["text"]
+
+    assert "Tool: open_url" not in prompt
+    assert "Server-side native tools" not in prompt
+    assert "Tool: mcp__CherryFetch__fetchJson" in prompt
+    assert "You do not have hidden browser, web, or URL-opening tools." in prompt
+    assert "Never call native tools such as `open_url`" in prompt
+
+
+def test_convert_messages_drops_blocked_tool_call_history():
+    converted = convert_messages(
+        messages=[
+            {"role": "user", "content": "打开 https://example.com"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call_bad",
+                        "function": {
+                            "name": "open_url",
+                            "arguments": '{"url":"https://example.com"}',
+                        },
+                    }
+                ],
+            },
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__CherryFetch__fetchJson",
+                    "description": "Fetch JSON",
+                    "parameters": {"type": "object"},
+                },
+            }
+        ],
+    )
+
+    prompt = converted[0]["content"][0]["text"]
+
+    assert "<ml_tool_name>open_url</ml_tool_name>" not in prompt
+    assert "Tool: mcp__CherryFetch__fetchJson" in prompt
+
+
 def test_convert_messages_repairs_cherry_fetch_url_and_skips_invalid_tool_error_history():
     converted = convert_messages(
         messages=[
@@ -201,6 +269,36 @@ def test_accumulator_repairs_param_name_only_tool_call_with_fallback_url():
         message["tool_calls"][0]["function"]["arguments"]
         == '{"url":"https://opendata.baidu.com/api.php?query=1.1.1.1&co=&resource_id=6006&oe=utf8"}'
     )
+
+
+def test_accumulator_ignores_unallowed_native_tool_call_blocks():
+    accumulator = GLMEventAccumulator(model="glm-test", allowed_tool_names={"get_weather"})
+    accumulator.consume_event(
+        {
+            "conversation_id": "conv_1",
+            "parts": [
+                {
+                    "logic_id": "1",
+                    "content": [
+                        {
+                            "type": "tool_calls",
+                            "tool_calls": {
+                                "id": "call_open_url",
+                                "name": "open_url",
+                                "arguments": '{"url":"https://example.com"}',
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    response = accumulator.build_response()
+    message = response["choices"][0]["message"]
+
+    assert response["choices"][0]["finish_reason"] == "stop"
+    assert "tool_calls" not in message
 
 
 def test_accumulator_keeps_markdown_block_separators_between_parts():
