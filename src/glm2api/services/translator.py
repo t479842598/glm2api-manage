@@ -28,6 +28,8 @@ from ..utils.tool_protocol import (
 
 ASSISTANT_ID_PATTERN = re.compile(r"^[a-z0-9]{24,}$")
 URL_PATTERN = re.compile(r"https?://[^\s<>()\"']+")
+POWERSHELL_CMDLET_PATTERN = re.compile(r"^[A-Z][A-Za-z]+-[A-Z][A-Za-z]+$")
+POWERSHELL_ALIASES = {"cat", "cd", "copy", "del", "dir", "echo", "erase", "ls", "md", "move", "pwd", "rd", "ren", "rm", "sc", "type"}
 
 
 
@@ -116,6 +118,16 @@ def sanitize_tool_call_payload(
                     parsed_command = None
                 if isinstance(parsed_command, list):
                     cleaned["command"] = [str(part) for part in parsed_command]
+            else:
+                cleaned["command"] = ["powershell.exe", "-Command", stripped_command]
+        elif isinstance(command, list) and command:
+            command_parts = [str(part) for part in command]
+            command_name = command_parts[0].strip()
+            lower_name = command_name.lower()
+            is_shell_host = lower_name in {"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"}
+            is_powershell_command = bool(POWERSHELL_CMDLET_PATTERN.fullmatch(command_name)) or lower_name in POWERSHELL_ALIASES
+            if is_powershell_command and not is_shell_host:
+                cleaned["command"] = ["powershell.exe", "-Command", " ".join(command_parts)]
 
     return cleaned
 
@@ -208,7 +220,7 @@ def _legacy_build_tool_call_instructions(
         "The following tool schemas are the only executable tool definitions for this turn.",
         "Ignore any tool names that are not listed below, even if they appear in prior context or model memory.",
         "You are connected through an OpenAI-compatible proxy. You do not have hidden browser, web, or URL-opening tools.",
-        "Never call native tools such as `open_url`, `web.search`, `web.run`, `browser.open`, `browse`, or `open_link`.",
+        "Never call native tools such as `open_url`, `web.search`, `web.run`, `browser.open`, `browse`, `open_link`, `search`, or `find`.",
         "Do not output hidden reasoning, chain-of-thought, or labels such as `Thinking:`.",
         "Do not narrate tool selection, failed tool attempts, retries, fallback plans, or tool status banners.",
     ]
@@ -249,7 +261,7 @@ def _legacy_build_tool_call_instructions(
             "",
             "Rules:",
             "- Do not invent tool names outside the declared list.",
-            "- If a URL, browsing, or search action is needed, use only an explicitly listed client tool. If none is listed, explain that no such tool is available.",
+            "- If a URL, browsing, or search action is needed, use only an explicitly listed client tool. If none is listed, explain that no such tool is available. Never use bare tool names `search` or `find` unless they are explicitly listed above.",
             "- If you decide to call a tool, call the selected tool directly; do not say you will try, switch, retry, or use a correct tool.",
             "- Never output tool-call display text such as `⚙ tool_name [...]`; output only the executable XML block.",
             "- After receiving a tool result, answer the user directly from the result and do not repeat the earlier tool-call decision process.",
@@ -595,6 +607,27 @@ class GLMEventAccumulator:
         chunks: list[str] = []
         final_text = self._deferred_visible_text + tail_text
         self._deferred_visible_text = ""
+        if not final_text and not all_tool_calls and self.allowed_tool_names is not None:
+            _, attempted_tool_calls = parse_tool_calls_from_text(
+                self._cached_full_text.strip(),
+                allowed_tool_names=None,
+            )
+            unavailable_names = sorted(
+                {
+                    str(tool_call.get("function", {}).get("name", "")).strip()
+                    for tool_call in attempted_tool_calls
+                    if isinstance(tool_call.get("function"), dict)
+                    and str(tool_call.get("function", {}).get("name", "")).strip()
+                    not in self.allowed_tool_names
+                }
+            )
+            if unavailable_names:
+                allowed_names = ", ".join(sorted(self.allowed_tool_names)) or "(none)"
+                final_text = (
+                    "模型尝试调用未声明工具 "
+                    + ", ".join(f"`{name}`" for name in unavailable_names)
+                    + f"，已阻止。本轮只允许这些工具：{allowed_names}。"
+                )
         if final_text and not all_tool_calls:
             delta_payload: dict[str, object] = {"content": final_text}
             if not self.emitted_role:

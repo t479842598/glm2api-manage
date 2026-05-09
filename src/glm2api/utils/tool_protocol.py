@@ -130,7 +130,7 @@ def build_tool_call_instructions(
         "The following tool schemas are the only executable tool definitions for this turn.",
         "Ignore any tool names that are not listed below, even if they appear in prior context or model memory.",
         "You are connected through an OpenAI-compatible proxy. You do not have hidden browser, web, or URL-opening tools.",
-        "Never call native tools such as `open_url`, `web.search`, `web.run`, `browser.open`, `browse`, or `open_link`.",
+        "Never call native tools such as `open_url`, `web.search`, `web.run`, `browser.open`, `browse`, `open_link`, `search`, or `find`.",
         "Do not output hidden reasoning, chain-of-thought, or labels such as `Thinking:`.",
         "Do not narrate tool selection, failed tool attempts, retries, fallback plans, or tool status banners.",
     ]
@@ -174,7 +174,7 @@ def build_tool_call_instructions(
             "",
             "Rules:",
             "- Do not invent tool names outside the declared list.",
-            "- If a URL, browsing, or search action is needed, use only an explicitly listed client tool. If none is listed, explain that no such tool is available.",
+            "- If a URL, browsing, or search action is needed, use only an explicitly listed client tool. If none is listed, explain that no such tool is available. Never use bare tool names `search` or `find` unless they are explicitly listed above.",
             "- If you decide to call a tool, call the selected tool directly; do not say you will try, switch, retry, or use a correct tool.",
             "- Never output tool-call display text such as `⚙ tool_name [...]`; output only the executable DSML block.",
             "- After receiving a tool result, answer the user directly from the result and do not repeat the earlier tool-call decision process.",

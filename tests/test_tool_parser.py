@@ -142,6 +142,35 @@ def test_parse_tool_calls_repairs_missing_final_dsml_close_angle():
     assert tool_calls[0]["function"]["arguments"] == '{"command":["powershell.exe","-Command","pwd"]}'
 
 
+def test_parse_tool_calls_repairs_double_pipe_dsml_close_tag():
+    text = (
+        '<|DSML|tool_calls><|DSML|invoke name="shell">'
+        '<|DSML|parameter name="command"><![CDATA[["powershell.exe", "-Command", "pwd"]]]></|DSML|parameter>'
+        '<||DSML|invoke></|DSML|tool_calls>'
+    )
+
+    clean, tool_calls = parse_tool_calls_from_text(text, {"shell"})
+
+    assert clean == ""
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["arguments"] == '{"command":["powershell.exe","-Command","pwd"]}'
+
+
+def test_parse_tool_calls_repairs_single_bracket_cdata_close():
+    text = (
+        '<|DSML|tool_calls><|DSML|invoke name="search">'
+        '<|DSML|parameter name="search_query"><![CDATA[{"q":"阿房宫赋","recency":365}]></|DSML|parameter>'
+        '</|DSML|invoke></|DSML|tool_calls>'
+    )
+
+    clean, tool_calls = parse_tool_calls_from_text(text, None)
+
+    assert clean == ""
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "search"
+    assert tool_calls[0]["function"]["arguments"] == '{"search_query":{"q":"阿房宫赋","recency":365}}'
+
+
 def test_streaming_tool_parser_hides_glm_malformed_dsml_until_flush():
     parser = StreamingToolParser(allowed_tool_names={"shell"})
     payload = (

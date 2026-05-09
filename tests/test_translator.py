@@ -214,6 +214,45 @@ def test_sanitize_shell_command_argument_from_quoted_sequence():
     }
 
 
+def test_sanitize_shell_command_argument_from_plain_string():
+    cleaned = sanitize_tool_call_payload(
+        "shell",
+        {
+            "command": "Get-ChildItem",
+        },
+    )
+
+    assert cleaned == {
+        "command": ["powershell.exe", "-Command", "Get-ChildItem"],
+    }
+
+
+def test_sanitize_shell_command_argument_wraps_powershell_cmdlet_array():
+    cleaned = sanitize_tool_call_payload(
+        "shell",
+        {
+            "command": ["Get-ChildItem", "-Recurse", "-Filter", "*.txt"],
+        },
+    )
+
+    assert cleaned == {
+        "command": ["powershell.exe", "-Command", "Get-ChildItem -Recurse -Filter *.txt"],
+    }
+
+
+def test_sanitize_shell_command_argument_keeps_native_executable_array():
+    cleaned = sanitize_tool_call_payload(
+        "shell",
+        {
+            "command": ["git", "status", "--short"],
+        },
+    )
+
+    assert cleaned == {
+        "command": ["git", "status", "--short"],
+    }
+
+
 def test_accumulator_drops_tool_preamble_and_repairs_shell_command_array():
     accumulator = GLMEventAccumulator(model="glm-test", allowed_tool_names={"shell"})
     chunks, status = accumulator.consume_event(
@@ -264,6 +303,36 @@ def test_accumulator_defers_visible_text_when_tools_available():
 
     assert chunks == []
     assert '"content":"你好"' in final_chunks[0]
+    assert '"finish_reason":"stop"' in final_chunks[1]
+
+
+def test_accumulator_reports_unavailable_dsml_tool_instead_of_empty_response():
+    accumulator = GLMEventAccumulator(model="glm-test", allowed_tool_names={"shell"})
+    chunks, status = accumulator.consume_event(
+        {
+            "conversation_id": "conv_1",
+            "status": "finish",
+            "parts": [
+                {
+                    "logic_id": "1",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": '<|DSML|tool_calls><|DSML|invoke name="search">'
+                            '<|DSML|parameter name="search_query"><![CDATA[{"q":"阿房宫赋","recency":365}]></|DSML|parameter>'
+                            "</|DSML|invoke></|DSML|tool_calls>",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    final_chunks = accumulator.finalize(status)
+
+    assert chunks == []
+    assert "未声明工具" in final_chunks[0]
+    assert "`search`" in final_chunks[0]
     assert '"finish_reason":"stop"' in final_chunks[1]
 
 

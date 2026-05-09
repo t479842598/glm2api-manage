@@ -30,6 +30,10 @@ DSML_COMPACT_CLOSE_TAG_PATTERN = re.compile(
     r"(?:</\|dsml|<\|/dsml)(?P<name>toolcalls|invoke|parameter|toolresult)\s*\|\s*>",
     re.IGNORECASE,
 )
+DSML_DOUBLE_PIPE_CLOSE_TAG_PATTERN = re.compile(
+    r"<\|\|dsml\|(?P<name>tool_calls|toolcalls|invoke|parameter|tool_result|toolresult)\s*\|?\s*>",
+    re.IGNORECASE,
+)
 DSML_TOOL_CALLS_CLOSE_PATTERN = re.compile(
     r"(?:</\|dsml\|tool_calls\s*>|</\|dsml\|tool_calls\s*\|\s*>|</\|dsmltool_?calls\s*\|\s*>|<\|/dsmltool_?calls\s*\|\s*>)",
     re.IGNORECASE,
@@ -98,6 +102,13 @@ def _repair_malformed_dsml(block: str) -> str:
         return block
 
     repaired = block.replace("]]|>", "]]>")
+    if "<![CDATA[" in repaired:
+        repaired = re.sub(
+            r"(?<!\])\]>(?=</\|dsml\|parameter\b|</\|DSML\|parameter\b|</parameter\b|</\|dsmlparameter\|)",
+            "]]>",
+            repaired,
+            flags=re.IGNORECASE,
+        )
 
     def replace_open(match: re.Match[str]) -> str:
         name = _canonical_dsml_name(match.group("name"))
@@ -110,6 +121,7 @@ def _repair_malformed_dsml(block: str) -> str:
     repaired = DSML_OPEN_TAG_PATTERN.sub(replace_open, repaired)
     repaired = DSML_CLOSE_TAG_PATTERN.sub(replace_close, repaired)
     repaired = DSML_COMPACT_CLOSE_TAG_PATTERN.sub(replace_close, repaired)
+    repaired = DSML_DOUBLE_PIPE_CLOSE_TAG_PATTERN.sub(replace_close, repaired)
     repaired = re.sub(
         r"(?:</\|dsml\|tool_calls|</\|dsmltool_?calls|<\|/dsmltool_?calls)\s*\|?\s*$",
         "</|DSML|tool_calls>",
