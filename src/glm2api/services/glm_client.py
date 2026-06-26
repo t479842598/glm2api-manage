@@ -5,6 +5,7 @@ import codecs
 import gzip
 import http.client
 import json
+import socket
 import mimetypes
 import re
 import threading
@@ -37,6 +38,10 @@ from .translator import (
 
 FILE_UPLOAD_URL_SUFFIX = "/backend-api/assistant/file_upload"
 FILE_SIZE_LIMIT = 100 * 1024 * 1024
+# Sentinel: yielded by _iter_sse_events when upstream has no data for a while,
+# so generate() can send an SSE keepalive comment to the client.
+_KEEPALIVE = object()
+KEEPALIVE_INTERVAL = 30  # seconds
 IMAGE_SIZE_TO_ASPECT_RATIO = {
     "1024x1024": "1:1",
     "1024x1536": "2:3",
@@ -226,6 +231,9 @@ class GLMWebClient:
         def generate():
             try:
                 for event in self._iter_sse_events(response):
+                    if event is _KEEPALIVE:
+                        yield b": keepalive\n\n"
+                        continue
                     if not event:
                         continue
                     self._raise_for_event_error(event, stream=True)
@@ -700,29 +708,47 @@ class GLMWebClient:
                 self.logger.debug("忽略无法解析的 SSE 片段: %s", payload)
                 return None
 
-        while True:
-            stop_after_chunk = False
-            try:
-                raw_chunk = response.read(4096)
-            except http.client.IncompleteRead as exc:
-                raw_chunk = exc.partial or b""
-                stop_after_chunk = True
-                self.logger.warning("上游 SSE 连接提前断开，按已接收内容收尾 bytes=%s", len(raw_chunk))
-            if not raw_chunk:
-                break
+        # Set a shorter socket timeout so we can send keepalive comments
+        # to the client while waiting for the upstream to respond.
+        # This prevents front-end idle-timeout errors (e.g. Open WebUI 45s).
+        sock = getattr(response, "fp", None)
+        original_timeout = None
+        if sock is not None and hasattr(sock, "settimeout"):
+            original_timeout = sock.gettimeout()
+            sock.settimeout(KEEPALIVE_INTERVAL)
 
-            pending += decoder.decode(raw_chunk, False).replace("\r\n", "\n")
+        try:
+            while True:
+                stop_after_chunk = False
+                try:
+                    raw_chunk = response.read(4096)
+                except socket.timeout:
+                    self.logger.debug("上游 SSE 读取超时（keepalive），继续等待")
+                    yield _KEEPALIVE
+                    continue
+                except http.client.IncompleteRead as exc:
+                    raw_chunk = exc.partial or b""
+                    stop_after_chunk = True
+                    self.logger.warning("上游 SSE 连接提前断开，按已接收内容收尾 bytes=%s", len(raw_chunk))
+                if not raw_chunk:
+                    break
 
-            while "\n\n" in pending:
-                block, pending = pending.split("\n\n", 1)
-                event = emit_block(block.strip())
-                if event == "[DONE]":
-                    return
-                if event is not None:
-                    yield event
+                pending += decoder.decode(raw_chunk, False).replace("\r\n", "\n")
 
-            if stop_after_chunk:
-                break
+                while "\n\n" in pending:
+                    block, pending = pending.split("\n\n", 1)
+                    event = emit_block(block.strip())
+                    if event == "[DONE]":
+                        return
+                    if event is not None:
+                        yield event
+
+                if stop_after_chunk:
+                    break
+        finally:
+            # Restore original socket timeout
+            if sock is not None and hasattr(sock, "settimeout") and original_timeout is not None:
+                sock.settimeout(original_timeout)
 
         remaining = decoder.decode(b"", True)
         if remaining:

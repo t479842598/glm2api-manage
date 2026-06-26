@@ -6,6 +6,11 @@
 
 ## 📢 更新日志
 
+### 2026-06-26 — v0.2.2 修复推理模型流式超时 + keepalive 心跳
+
+- **修复 GLM 5.2 等推理模型流式请求 45 秒超时** — 推理模型思考阶段不产生任何输出，导致前端 idle-timeout；现在在 SSE 读取层添加 30 秒 keepalive 心跳（`: keepalive` SSE 注释），防止前端因长时间无数据而断开连接
+- **修复流式请求中途报 `GLM part status error`** — GLM 的 SSE 流中，单个 part（如 reasoning 段）可能以 `status: "error"` 结束，但 event 级别状态仍为 `finish`，之前会错误地中断整个流，现在只在 event 级别确实为 error 时才中断
+
 ### 2026-06-26 — v0.2.1 修复流式响应中途报错
 
 - **修复流式请求中途报 `GLM part status error`** — GLM 的 SSE 流中，单个 part（如 reasoning 段）可能以 `status: "error"` 结束，但 event 级别状态仍为 `finish`，之前会错误地中断整个流，现在只在 event 级别确实为 error 时才中断
