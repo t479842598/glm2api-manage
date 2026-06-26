@@ -17,3 +17,18 @@ docs
 
 main.spec
 tokenizer.json
+
+# Temp deploy files
+*.pyc
+__pycache__/
+token.txt
+check*.py
+fix*.py
+upload*.py
+verify*.py
+deploy*.py
+
+# IDE/tool dirs
+.lrnev/
+.reasonix/
+.kunsdd/

@@ -2,9 +2,26 @@
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ft479842598%2Fglm2api-manage&env=ADMIN_KEY&envDescription=%E7%AE%A1%E7%90%86%E9%9D%A2%E6%9D%BF%E7%99%BB%E5%BD%95%E5%AF%86%E9%92%A5%EF%BC%8C%E9%BB%98%E8%AE%A4%E4%B8%BA%20glm2api-admin)
 
+---
+
+## 📢 更新日志
+
+### 2026-06-26 — v0.2.0 管理面板大升级
+
+- **修复管理面板白屏** — 抛弃 CDN 依赖，Vue 3 + Naive UI 改为本地加载，登录框用原生 HTML
+- **新增 VPS 部署脚本** — 一键上传、配置 systemd 服务 + Nginx 反向代理
+- **Token 分页** — 每页 10 条，首页/上一页/下一页/末页导航
+- **日志按级别着色** — DEBUG 灰、INFO 绿、WARNING 橙、ERROR 红加粗
+- **对话测试改进** — 新增 System Prompt、模型搜索、耗时显示
+- **配置页精简** — 只展示前 5 条关键配置
+- **静态文件路由** — `/admin/lib/*` 安全提供本地静态资源
+- **端口冲突处理** — 8000 被占用可切换 `PORT` 环境变量
+
+---
+
 `glm2api` 是一个**零外部依赖**的本地代理服务，把 `chatglm.cn` 的网页接口转换成 OpenAI / Anthropic 兼容接口。直接接入 OpenAI SDK、Cherry Studio、Open WebUI、LobeChat 或任何兼容 OpenAI API 的工具。
 
-**✨ 新特性：内置管理面板 + API Key 管理，支持一键部署到 Vercel。**
+**✨ 内置管理面板 + API Key 管理 + VPS 一键部署。**
 
 ---
 
@@ -95,12 +112,12 @@ curl http://127.0.0.1:8000/v1/models
 | 页面 | 功能 |
 |------|------|
 | **概览** | 账号数、模型数、并发上限、请求成功率统计 |
-| **配置** | 查看完整运行时配置 |
-| **Token** | 脱敏浏览各账号 token（游客 / 真实账号） |
-| **日志** | 实时日志流，支持按级别过滤、自动刷新 |
+| **配置** | 前 5 条关键运行时配置概览 |
+| **Token** | 脱敏浏览各账号 token，支持分页（每页 10 条） |
+| **日志** | 实时日志流，按级别着色（DEBUG 灰/INFO 绿/WARNING 橙/ERROR 红），支持过滤和自动刷新 |
 | **请求记录** | 最近 500 条请求（方法、路径、模型、状态码、耗时） |
 | **API Key** | 增删改查 API 密钥，启用/禁用切换 |
-| **对话测试** | 一键发送聊天请求验证连通性 |
+| **对话测试** | 选择模型、输入提示词和 System Prompt，查看返回结果 |
 
 ### 自定义管理员密钥
 
@@ -283,6 +300,79 @@ nssm install glm2api
 
 nssm start glm2api
 ```
+
+---
+
+### VPS 一键部署
+
+适用于 Ubuntu 24.04+ 服务器，自动完成安装、配置 systemd 服务 + Nginx 反向代理：
+
+```bash
+# 1. 在本地克隆项目后上传
+rsync -avz --exclude='.git' --exclude='__pycache__' -e 'ssh -p 22' ./ root@你的服务器IP:/opt/glm2api/
+
+# 2. 登录服务器，设置环境变量
+ssh root@你的服务器IP
+cd /opt/glm2api
+
+# 3. 修改监听地址为 0.0.0.0，让 Nginx 可以代理
+sed -i 's/^HOST=.*/HOST=0.0.0.0/' .env
+sed -i 's/^PORT=.*/PORT=8001/' .env  # 如 8000 被占用
+
+# 4. 创建 systemd 服务
+cat > /etc/systemd/system/glm2api.service << 'EOF'
+[Unit]
+Description=glm2api - GLM to OpenAI API Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/glm2api
+Environment=PYTHONPATH=/opt/glm2api/src
+ExecStart=/usr/bin/python3 /opt/glm2api/main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload && systemctl enable --now glm2api
+
+# 5. 配置 Nginx 反向代理（将域名替换为你的实际域名）
+cat > /etc/nginx/sites-available/glm2api.conf << 'NGX'
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+NGX
+
+ln -sf /etc/nginx/sites-available/glm2api.conf /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+
+# 6. 可选：配置 HTTPS
+certbot --nginx -d your-domain.com
+```
+
+> **注意**：管理面板的 Vue 3 + Naive UI 静态文件已内置在项目 `admin_static/lib/` 目录中，无需额外下载。
 
 ---
 

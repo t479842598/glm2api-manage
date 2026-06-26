@@ -49,6 +49,49 @@ from .services.responses_adapter import (
 _CLIENT_DISCONNECTED = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout)
 RESPONSES_STREAM_HEARTBEAT_SECONDS = 5.0
 
+# MIME types for static files
+_STATIC_MIME: dict[str, str] = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+}
+
+
+def _serve_admin_static(handler, path: str) -> None:
+    """Serve static files from the admin_static/lib directory."""
+    from pathlib import Path
+
+    filename = path.removeprefix("/admin/lib/")
+    lib_dir = Path(__file__).parent / "admin_static" / "lib"
+    file_path = lib_dir / filename
+
+    # Security: prevent directory traversal
+    try:
+        file_path = file_path.resolve(strict=False)
+    except (ValueError, OSError):
+        handler.send_response(404)
+        handler.end_headers()
+        return
+    if not str(file_path).startswith(str(lib_dir.resolve())):
+        handler.send_response(403)
+        handler.end_headers()
+        return
+
+    if not file_path.is_file():
+        handler.send_response(404)
+        handler.end_headers()
+        return
+
+    suffix = file_path.suffix.lower()
+    content_type = _STATIC_MIME.get(suffix, "application/octet-stream")
+    body = file_path.read_bytes()
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
 
 class GLM2APIServer:
     def __init__(self, config: AppConfig, glm_client: GLMWebClient, logger: Logger) -> None:
@@ -117,6 +160,11 @@ class GLM2APIServer:
                             },
                         )
                         request_store.add(RequestRecord(method="GET", path="/v1/models", status=200, duration_ms=(time.time() - _start) * 1000))
+                        return
+
+                    # ── Admin static files (lib) ──────────────────────────
+                    if path.startswith("/admin/lib/"):
+                        _serve_admin_static(self, path)
                         return
 
                     # ── Admin routes ────────────────────────────────────
