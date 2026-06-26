@@ -8,10 +8,12 @@
 
 ### 2026-06-26 — v0.2.3 修复工具调用流式中断 + keepalive 心跳实际不生效
 
-- **彻底修复 GLM 5.2 等推理模型调用工具（如读取文件）后流式响应被中断** — `_extract_event_error` 中 event 级别 status 为空字符串时（工具执行中），part 级别 `status: "error"`（reasoning 段正常结束）会被误判为致命错误，抛出 `UpstreamAPIError` 中断整个流。现已修正为**仅在 event 级别 status 明确为 `"error"` 时才返回错误**
-- **修复 keepalive 心跳 30 秒超时实际未生效** — `sock = getattr(response, \"fp\", None)` 拿到的是 `HTTPResponse` 对象，该对象没有 `settimeout` 方法；keepalive 超时一直退化到 `urlopen` 的 120 秒默认值。现已通过 `response.fp.fp.raw._sock` 正确穿透到原始 socket，30 秒心跳正常发送，同时兼容 gzip 压缩包装链路
+- **三重修复 GLM 5.2 等推理模型调用工具后流式响应被中断** — 原代码存在三层误判链路：
+  1. `_extract_event_error` 第二段检查中 event 级别 status 为空字符串时（工具执行中），part 级别 `status: "error"`（reasoning 段正常结束）被误判返回 `"GLM part status error"` → 已修正为**仅在 event status 明确为 `"error"` 时才检查 part**
+  2. **part 级别 `status: "error"` 永远不是致命错误** — 即使 event status 为 `"error"`，part 的 `status: "error"` 也只是内部生命周期状态，不应中断流。现已彻底移除返回 `"GLM part status error"` 的代码，改为 `logger.debug` 日志记录
+  3. `_raise_for_event_error` 在 event status 为 `"error"` 但无任何错误负载时仍抛 `"GLM stream request error"` 兜底错误 → 已新增安全阀：**没有具体错误负载时，即使 event status 是 `"error"` 也不抛错**，仅记日志
+- **修复 keepalive 心跳 30 秒超时实际未生效** — `sock = getattr(response, "fp", None)` 拿到的是 `HTTPResponse` 对象，该对象没有 `settimeout` 方法；keepalive 超时一直退化到 `urlopen` 的 120 秒默认值。现已通过 `response.fp.fp.raw._sock` 正确穿透到原始 socket，30 秒心跳正常发送，同时兼容 gzip 压缩包装链路
 - **修复 socket.settimeout OSError 未捕获** — 防止操作已被关闭的 socket 时抛异常
-
 ### 2026-06-26 — v0.2.2 修复推理模型流式超时 + keepalive 心跳
 
 - **修复 GLM 5.2 等推理模型流式请求 45 秒超时** — 推理模型思考阶段不产生任何输出，导致前端 idle-timeout；现在在 SSE 读取层添加 30 秒 keepalive 心跳（`: keepalive` SSE 注释），防止前端因长时间无数据而断开连接

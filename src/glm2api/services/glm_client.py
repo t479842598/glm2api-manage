@@ -270,7 +270,16 @@ class GLMWebClient:
             error_payload.update(last_error)
         if isinstance(event_error, dict):
             error_payload.update(event_error)
-        if not error_payload and status != "error":
+        if not error_payload:
+            # Event-level status is "error" but no actual error payload.
+            # GLM internally sets status "error" on intermediate events during
+            # tool execution / reasoning.  Without a concrete error payload
+            # this is not a real error; log and ignore.
+            if status == "error" and self.logger:
+                self.logger.debug(
+                    "event status=error 但无错误负载, 忽略 (stream=%s)",
+                    stream,
+                )
             return
 
         error_code = error_payload.get("error_code", error_payload.get("code"))
@@ -291,29 +300,29 @@ class GLMWebClient:
         if not isinstance(parts, list):
             return None
         event_status = str(event.get("status", "")).strip().lower()
-        # Only treat errors as fatal when the event-level status is explicitly
-        # "error".  GLM may mark individual parts (e.g. a reasoning segment)
-        # with status "error" while other parts and the overall event are still
-        # fine — especially during tool execution where parts finish at
-        # different times.  Treating empty or non-error event status as fatal
-        # caused the stream to be interrupted prematurely when GLM 5.2 called
-        # tools (e.g. file reading).
+        # GLM may mark individual parts (e.g. a reasoning segment) with status
+        # "error" while other parts and the overall event are still fine —
+        # especially during tool execution where parts finish at different
+        # times.  Part-level status "error" is NEVER treated as fatal; it is a
+        # normal part lifecycle state, not an actual error.  Only explicit
+        # error dicts inside parts are treated as real errors, and even then
+        # only when the event-level status is explicitly "error".
         if event_status != "error":
             return None
-        # First pass: check for explicit error dicts in parts
+        # Check for explicit error dicts in parts (these indicate actual errors)
         for part in parts:
             if not isinstance(part, dict):
                 continue
             error = part.get("error")
             if isinstance(error, dict) and error:
                 return error
-        # Second pass: check for part-level status "error"
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
+            # Log part-level status "error" for debugging but never treat as fatal
             part_status = str(part.get("status", "")).strip().lower()
-            if part_status == "error":
-                return {"message": "GLM part status error"}
+            if part_status == "error" and self.logger:
+                self.logger.debug(
+                    "part status=error (event status=%s, 忽略, 非致命)",
+                    event_status,
+                )
         return None
 
     def delete_conversation(self, conversation_id: str, assistant_id: str | None = None) -> None:
