@@ -1,0 +1,2 @@
+# glm2api — zero external dependencies (pure stdlib).
+# This file exists for Vercel's build step; no packages are needed.

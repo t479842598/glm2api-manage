@@ -7,7 +7,7 @@ name = "glm2api"
 version = "0.1.0"
 description = "将智谱清言 GLM Web 端接口转换为 OpenAI Chat Completions 兼容 API 的轻量代理。"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]

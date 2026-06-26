@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -165,6 +166,40 @@ def _should_use_colour() -> bool:
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 
+# ── In-memory log buffer for admin panel ────────────────────────────────────
+
+_MAX_BUFFERED_LOGS = 2000
+_buffered_logs: list[dict[str, object]] = []
+_buffer_lock = threading.Lock()
+_log_counter = 0
+
+
+class _MemoryLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        global _log_counter
+        with _buffer_lock:
+            _log_counter += 1
+            _buffered_logs.append({
+                "id": _log_counter,
+                "time": self.format(record),
+                "level": record.levelname,
+                "logger": record.name.replace("glm2api.", ""),
+                "msg": record.getMessage(),
+            })
+            while len(_buffered_logs) > _MAX_BUFFERED_LOGS:
+                _buffered_logs.pop(0)
+
+
+def get_buffered_logs(since_id: int = 0, limit: int = 200, level: str | None = None) -> list[dict[str, object]]:
+    with _buffer_lock:
+        items = _buffered_logs[:]
+    if since_id:
+        items = [it for it in items if it["id"] > since_id]
+    if level:
+        items = [it for it in items if it["level"] == level.upper()]
+    return items[-limit:]
+
+
 def setup_logging(level: str) -> None:
     # Attempt to force UTF-8 on Windows consoles so Unicode icons survive emit.
     if _IS_WINDOWS:
@@ -183,6 +218,12 @@ def setup_logging(level: str) -> None:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(_TUIFormatter(use_colour=_should_use_colour()))
     root.addHandler(console)
+
+    # ── Memory handler (for admin panel) ─────────────────────────────────────
+    mem_handler = _MemoryLogHandler()
+    mem_handler.setFormatter(_PlainFormatter())
+    mem_handler.setLevel(logging.DEBUG)
+    root.addHandler(mem_handler)
 
     # ── File handler (plain text, only when DEBUG) ───────────────────────────
     if resolved_level <= logging.DEBUG:

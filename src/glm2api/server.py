@@ -4,6 +4,7 @@ import json
 import queue
 import socket
 import threading
+import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,26 @@ from urllib.parse import urlparse
 
 from .config import AppConfig
 from .logging_utils import debug_dump
+from .admin import (
+    ApiKeyStore,
+    RequestLogStore,
+    RequestRecord,
+    handle_admin_api_key_create,
+    handle_admin_api_key_delete,
+    handle_admin_api_key_toggle,
+    handle_admin_api_key_update,
+    handle_admin_api_keys_list,
+    handle_admin_chat_test,
+    handle_admin_config,
+    handle_admin_login,
+    handle_admin_logout,
+    handle_admin_logs,
+    handle_admin_overview,
+    handle_admin_page,
+    handle_admin_requests,
+    handle_admin_requests_clear,
+    handle_admin_session,
+)
 from .services.anthropic_adapter import (
     AnthropicStreamAccumulator,
     anthropic_to_openai,
@@ -34,6 +55,12 @@ class GLM2APIServer:
         self.config = config
         self.glm_client = glm_client
         self.logger = logger
+        self.api_key_store = ApiKeyStore()
+        # Load existing keys from env
+        import os
+        raw = os.environ.get("GLM2API_API_KEYS", "")
+        if raw:
+            self.api_key_store.load_json(raw)
         handler_cls = self._build_handler()
         self._server = ThreadingHTTPServer((config.host, config.port), handler_cls)
         self._server.daemon_threads = True
@@ -50,10 +77,18 @@ class GLM2APIServer:
         config = self.config
         glm_client = self.glm_client
         logger = self.logger
+        api_key_store = self.api_key_store
+        request_store = RequestLogStore()
 
         class RequestHandler(BaseHTTPRequestHandler):
             server_version = "glm2api/0.1.0"
             protocol_version = "HTTP/1.1"
+
+            # Admin integration attributes
+            _admin_config = config
+            _admin_glm_client = glm_client
+            _admin_request_store = request_store
+            _admin_api_key_store = api_key_store
 
             def do_OPTIONS(self) -> None:
                 self.send_response(HTTPStatus.NO_CONTENT)
@@ -61,11 +96,13 @@ class GLM2APIServer:
                 self.end_headers()
 
             def do_GET(self) -> None:
+                _start = time.time()
                 try:
                     self._debug_log_request_start()
                     path = self._path_without_query()
                     if path == "/health":
                         self._write_json(HTTPStatus.OK, {"status": "ok"})
+                        request_store.add(RequestRecord(method="GET", path="/health", status=200, duration_ms=(time.time() - _start) * 1000))
                         return
 
                     if path == f"{config.api_prefix}/models":
@@ -79,10 +116,41 @@ class GLM2APIServer:
                                 ],
                             },
                         )
+                        request_store.add(RequestRecord(method="GET", path="/v1/models", status=200, duration_ms=(time.time() - _start) * 1000))
+                        return
+
+                    # ── Admin routes ────────────────────────────────────
+                    if path in ("/admin", "/admin/"):
+                        handle_admin_page(self)
+                        return
+
+                    if path == "/admin/api/session":
+                        handle_admin_session(self)
+                        return
+
+                    if path == "/admin/api/overview":
+                        handle_admin_overview(self)
+                        return
+
+                    if path == "/admin/api/config":
+                        handle_admin_config(self)
+                        return
+
+                    if path.startswith("/admin/api/logs"):
+                        handle_admin_logs(self)
+                        return
+
+                    if path.startswith("/admin/api/requests"):
+                        handle_admin_requests(self)
+                        return
+
+                    if path == "/admin/api/api-keys":
+                        handle_admin_api_keys_list(self)
                         return
 
                     logger.debug("GET 未匹配 path=%s", self.path)
                     self._write_json(HTTPStatus.NOT_FOUND, {"error": {"message": "Not Found"}})
+                    request_store.add(RequestRecord(method="GET", path=path, status=404, duration_ms=(time.time() - _start) * 1000))
                 except _CLIENT_DISCONNECTED:
                     logger.warning("客户端在 GET 响应写回前断开 path=%s", self.path)
                 except Exception as exc:
@@ -93,9 +161,47 @@ class GLM2APIServer:
                     )
 
             def do_POST(self) -> None:
+                _start = time.time()
+                path = self._path_without_query()
                 try:
                     self._debug_log_request_start()
-                    path = self._path_without_query()
+                    # ── Admin POST routes ──────────────────────────────
+                    if path == "/admin/api/login":
+                        handle_admin_login(self, config)
+                        return
+
+                    if path == "/admin/api/logout":
+                        handle_admin_logout(self)
+                        return
+
+                    if path == "/admin/api/chat-test":
+                        handle_admin_chat_test(self)
+                        return
+
+                    if path == "/admin/api/requests/clear":
+                        handle_admin_requests_clear(self)
+                        return
+
+                    # ── API Key management ──────────────────────────
+                    # POST /admin/api/api-keys/{name}         — update
+                    # POST /admin/api/api-keys/{name}/delete  — delete
+                    # POST /admin/api/api-keys/{name}/toggle  — toggle
+                    if path.startswith("/admin/api/api-keys/"):
+                        rest = path[len("/admin/api/api-keys/"):]
+                        if rest.endswith("/delete"):
+                            handle_admin_api_key_delete(self, rest[:-len("/delete")])
+                            return
+                        if rest.endswith("/toggle"):
+                            handle_admin_api_key_toggle(self, rest[:-len("/toggle")])
+                            return
+                        if rest:
+                            handle_admin_api_key_update(self, rest)
+                            return
+                        return
+
+                    if path == "/admin/api/api-keys":
+                        handle_admin_api_key_create(self)
+                        return
                     if path not in {
                         f"{config.api_prefix}/chat/completions",
                         f"{config.api_prefix}/images/generations",
@@ -171,6 +277,10 @@ class GLM2APIServer:
                         logger.info("收到绘图请求 model=%s prompt=%s", payload.get("model"), payload.get("prompt"))
                         result = glm_client.generate_images(payload)
                         self._write_json(HTTPStatus.OK, result)
+                        request_store.add(RequestRecord(
+                            method="POST", path=path, model=str(payload.get("model", "")),
+                            status=200, duration_ms=(time.time() - _start) * 1000,
+                        ))
                         return
 
                     # --- Chat completions ---
@@ -188,6 +298,10 @@ class GLM2APIServer:
                     logger.info("收到 chat 请求 model=%s", payload.get("model"))
                     result, conversation_id = glm_client.chat_completion(payload)
                     self._write_json(HTTPStatus.OK, result)
+                    request_store.add(RequestRecord(
+                        method="POST", path=path, model=str(payload.get("model", "")),
+                        status=200, duration_ms=(time.time() - _start) * 1000,
+                    ))
                 except QueueTimeoutError as exc:
                     logger.warning("GLM 队列等待超时 error=%s", exc)
                     self._write_json(
@@ -396,16 +510,30 @@ class GLM2APIServer:
             # ---- Auth ----
 
             def _authorize(self) -> bool:
-                if not config.server_api_keys:
-                    return True
-                # Support both Bearer token and x-api-key header (Anthropic style)
-                authorization = self.headers.get("Authorization", "")
-                if authorization.startswith("Bearer "):
-                    token = authorization[7:].strip()
-                    if token in config.server_api_keys:
+                # Check legacy SERVER_API_KEYS first
+                if config.server_api_keys:
+                    authorization = self.headers.get("Authorization", "")
+                    if authorization.startswith("Bearer "):
+                        token = authorization[7:].strip()
+                        if token in config.server_api_keys:
+                            return True
+                    x_api_key = self.headers.get("x-api-key", "")
+                    if x_api_key and x_api_key.strip() in config.server_api_keys:
                         return True
-                x_api_key = self.headers.get("x-api-key", "")
-                if x_api_key and x_api_key.strip() in config.server_api_keys:
+
+                # Check structured API key store
+                store: ApiKeyStore = self._admin_api_key_store
+                if store.active_count > 0:
+                    authorization = self.headers.get("Authorization", "")
+                    if authorization.startswith("Bearer "):
+                        if store.validate(authorization[7:].strip()):
+                            return True
+                    x_api_key = self.headers.get("x-api-key", "")
+                    if x_api_key and store.validate(x_api_key.strip()):
+                        return True
+
+                # If neither legacy keys nor store keys exist, auth is open
+                if not config.server_api_keys and store.active_count == 0:
                     return True
                 return False
 

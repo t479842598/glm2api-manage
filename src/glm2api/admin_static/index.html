@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>glm2api Admin</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/naive-ui@2/dist/index.prod.js"></script>
+  <style>
+    :root {
+      --bg: #f5f7fb; --panel: #fff; --line: #d9e1ec;
+      --text: #1f2937; --muted: #64748b; --accent: #1677b3;
+      --accent-soft: #e7f2fb; --danger-soft: #fff1f0;
+      --mono: "JetBrains Mono", Consolas, monospace;
+      --sans: "Geist", "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; } body { margin: 0; color: var(--text); background: var(--bg); font-family: var(--sans); }
+    [v-cloak] { display: none; }
+    .login-shell { min-height: 100dvh; display: grid; grid-template-columns: 1fr 400px; background: linear-gradient(120deg, rgba(22,119,179,.08), transparent 36%), linear-gradient(180deg, #fbfcfe, #edf2f7); }
+    .login-brief { display: flex; flex-direction: column; justify-content: space-between; padding: 56px 64px; border-right: 1px solid var(--line); }
+    .brand-mark { display: inline-flex; width: 42px; height: 42px; align-items: center; justify-content: center; border-radius: 10px; background: #1a365d; color: #fff; font-family: var(--mono); font-weight: 700; }
+    .login-title { margin: 0; font-size: 38px; line-height: 1.1; font-weight: 760; }
+    .login-subtitle { max-width: 480px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+    .login-card { display: flex; align-items: center; justify-content: center; padding: 36px; background: rgba(255,255,255,.72); backdrop-filter: blur(14px); }
+    .login-panel { width: 100%; max-width: 340px; }
+    .app-shell { min-height: 100dvh; display: grid; grid-template-columns: 220px 1fr; }
+    .sidebar { padding: 20px 14px; background: #111827; color: #e5eef7; display: flex; flex-direction: column; gap: 18px; }
+    .sidebar-head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid #1f2937; }
+    .sidebar-head h2 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+    .nav-item { padding: 9px 14px; border-radius: 8px; cursor: pointer; transition: background .15s; font-size: 14px; color: #9ca3af; display: flex; align-items: center; gap: 10px; }
+    .nav-item:hover { background: #1f2937; color: #e5eef7; }
+    .nav-item.active { background: #1f2937; color: #fff; font-weight: 600; }
+    .nav-icon { font-size: 18px; width: 24px; text-align: center; }
+    .main { padding: 32px 36px; overflow-y: auto; }
+    .section-title { font-size: 20px; font-weight: 700; margin: 0 0 20px 0; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+    .stat-card { background: var(--panel); border-radius: 10px; padding: 18px 20px; border: 1px solid var(--line); }
+    .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .stat-card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--panel); border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+    .data-table th { background: #f8fafc; padding: 10px 14px; text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--line); }
+    .data-table td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
+    .data-table tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .badge-ok { background: #e6f7ed; color: #15803d; }
+    .badge-err { background: #fef2f2; color: #b91c1c; }
+    .badge-warn { background: #fefce8; color: #a16207; }
+    .badge-info { background: var(--accent-soft); color: var(--accent); }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .tag { display: inline-block; padding: 3px 10px; background: #f1f5f9; border-radius: 6px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+    .kv-row { display: flex; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .kv-row:last-child { border-bottom: none; }
+    .kv-key { width: 200px; color: var(--muted); flex-shrink: 0; font-weight: 500; }
+    .kv-val { font-family: var(--mono); word-break: break-all; }
+    .log-line { padding: 4px 10px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid #f1f5f9; white-space: pre-wrap; }
+    .log-level-DEBUG { color: var(--muted); }
+    .log-level-INFO { color: #15803d; }
+    .log-level-WARNING { color: #a16207; }
+    .log-level-ERROR { color: #b91c1c; }
+    .empty-state { text-align: center; padding: 40px; color: var(--muted); }
+    @media (max-width: 768px) {
+      .login-shell { grid-template-columns: 1fr; }
+      .login-brief { display: none; }
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app" v-cloak>
+  <!-- ── Login ───────────────────────────────────────────── -->
+  <div v-if="!authenticated" class="login-shell">
+    <div class="login-brief">
+      <div>
+        <div class="brand-mark">G2A</div>
+        <h1 class="login-title" style="margin-top:30px">glm2api<br>管理面板</h1>
+        <p class="login-subtitle" style="margin-top:20px">
+          查看服务状态、管理账号 Token、浏览实时日志与请求记录，以及一键测试模型对话。
+        </p>
+      </div>
+      <p style="color:var(--muted);font-size:13px">glm2api v0.1.0 · 零依赖 · 纯 stdlib</p>
+    </div>
+    <div class="login-card">
+      <div class="login-panel">
+        <n-space vertical size="large">
+          <n-h3 style="margin:0">登录管理面板</n-h3>
+          <n-input v-model:value="loginKey" type="password" placeholder="输入 ADMIN_KEY" show-password-on="click" @keyup.enter="doLogin" />
+          <n-button type="primary" block @click="doLogin" :loading="loginLoading">登录</n-button>
+          <n-text v-if="loginError" type="error" depth="3">{{ loginError }}</n-text>
+        </n-space>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main app ────────────────────────────────────────── -->
+  <div v-else class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <div class="brand-mark" style="width:32px;height:32px;font-size:11px">G2A</div>
+        <h2>glm2api</h2>
+      </div>
+      <div v-for="nav in navs" :key="nav.id" class="nav-item" :class="{active: activeNav===nav.id}" @click="activeNav=nav.id">
+        <span class="nav-icon">{{ nav.icon }}</span> {{ nav.label }}
+      </div>
+      <div style="flex:1"></div>
+      <div class="nav-item" @click="doLogout" style="color:#f87171">
+        <span class="nav-icon">⇥</span> 退出
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ── Dashboard ────────────────────────────────────── -->
+      <template v-if="activeNav==='overview'">
+        <h2 class="section-title">概览</h2>
+        <div class="card-grid">
+          <div class="stat-card"><div class="label">账号数</div><div class="value">{{ overview.token_count }}</div></div>
+          <div class="stat-card"><div class="label">模型数</div><div class="value">{{ overview.model_count }}</div></div>
+          <div class="stat-card"><div class="label">并发上限</div><div class="value">{{ overview.concurrency }}</div></div>
+          <div class="stat-card"><div class="label">请求成功率</div><div class="value" :style="{color: overview.total>0 && overview.success/overview.total>.9 ? '#15803d' : '#b91c1c'}">{{ overview.total ? (overview.success/overview.total*100).toFixed(1)+'%' : '--' }}</div></div>
+        </div>
+        <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax(120px,1fr))">
+          <div class="stat-card"><div class="label">总请求</div><div class="value" style="font-size:22px">{{ overview.total || 0 }}</div></div>
+          <div class="stat-card"><div class="label">成功</div><div class="value" style="font-size:22px;color:#15803d">{{ overview.success || 0 }}</div></div>
+          <div class="stat-card"><div class="label">失败</div><div class="value" style="font-size:22px;color:#b91c1c">{{ overview.error || 0 }}</div></div>
+          <div class="stat-card"><div class="label">均耗时</div><div class="value" style="font-size:22px">{{ overview.avg_ms || 0 }}ms</div></div>
+          <div class="stat-card"><div class="label">游客模式</div><div class="value" style="font-size:16px;margin-top:8px"><span :class="'badge '+(overview.guest_mode?'badge-warn':'badge-ok')">{{ overview.guest_mode ? '开启' : '关闭' }}</span></div></div>
+        </div>
+      </template>
+
+      <!-- ── Config ───────────────────────────────────────── -->
+      <template v-if="activeNav==='config'">
+        <h2 class="section-title">配置</h2>
+        <div class="stat-card" style="margin-bottom:20px" v-if="configData">
+          <div class="kv-row" v-for="(v,k) in configData" :key="k">
+            <span class="kv-key">{{ k }}</span>
+            <span class="kv-val">{{ typeof v==='object' ? JSON.stringify(v) : String(v) }}</span>
+          </div>
+        </div>
+        <n-text depth="3" v-else>加载中...</n-text>
+      </template>
+
+      <!-- ── API Keys ──────────────────────────────────────── -->
+      <template v-if="activeNav==='api-keys'">
+        <h2 class="section-title">API Key 管理</h2>
+        <div style="margin-bottom:14px;display:flex;gap:10px;align-items:center">
+          <n-button type="primary" size="small" @click="openCreateApiKey">➕ 添加 Key</n-button>
+          <n-text depth="3" style="font-size:12px">{{ apiKeys.length }} 个 Key · {{ apiKeys.filter(k=>k.enabled).length }} 个启用</n-text>
+          <n-tag v-if="configData && !configData.auth_enabled" type="info" size="small" style="margin-left:8px">当前免认证（无启用的 Key）</n-tag>
+          <n-tag v-else type="warning" size="small" style="margin-left:8px">认证已开启</n-tag>
+        </div>
+        <table class="data-table" v-if="apiKeys.length">
+          <thead><tr><th>名称</th><th>密钥</th><th>状态</th><th>创建时间</th><th style="width:180px">操作</th></tr></thead>
+          <tbody>
+            <tr v-for="k in apiKeys" :key="k.name">
+              <td class="mono">{{ k.name }}</td>
+              <td class="mono" style="color:var(--muted)">{{ k.key }}</td>
+              <td>
+                <span :class="'badge '+(k.enabled?'badge-ok':'badge-err')">{{ k.enabled ? '启用' : '禁用' }}</span>
+              </td>
+              <td class="mono" style="color:var(--muted);font-size:11px">{{ k.created_at }}</td>
+              <td>
+                <n-button size="tiny" @click="openEditApiKey(k)" style="margin-right:4px">更新</n-button>
+                <n-button size="tiny" @click="toggleApiKey(k.name)" :type="k.enabled?'warning':'success'" style="margin-right:4px">{{ k.enabled ? '禁用' : '启用' }}</n-button>
+                <n-button size="tiny" type="error" @click="deleteApiKey(k.name)">删除</n-button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="empty-state" v-else>暂无 API Key，添加后即可启用认证</div>
+
+        <!-- API Key form dialog -->
+        <n-modal v-model:show="apiKeyDialog" preset="card" :title="apiKeyFormMode==='create'?'添加 API Key':'更新 API Key'" style="width:440px">
+          <n-space vertical>
+            <n-input v-model:value="apiKeyFormName" placeholder="Key 名称（如 my-app）" :disabled="apiKeyFormMode==='edit'" />
+            <n-input v-model:value="apiKeyFormKey" type="password" show-password-on="click" :placeholder="apiKeyFormMode==='create'?'输入密钥（至少4位）':'新密钥（留空不修改）'" @keyup.enter="saveApiKey" />
+            <n-text v-if="apiKeyError" type="error" depth="3">{{ apiKeyError }}</n-text>
+          </n-space>
+          <template #footer>
+            <n-button @click="apiKeyDialog=false">取消</n-button>
+            <n-button type="primary" @click="saveApiKey" :loading="apiKeySaving">保存</n-button>
+          </template>
+        </n-modal>
+      </template>
+
+      <!-- ── Tokens ────────────────────────────────────────── -->
+      <template v-if="activeNav==='tokens'">
+        <h2 class="section-title">账号 Token</h2>
+        <table class="data-table" v-if="configData && configData.tokens">
+          <thead><tr><th>#</th><th>前缀</th><th>脱敏值</th><th>类型</th></tr></thead>
+          <tbody>
+            <tr v-for="t in configData.tokens" :key="t.index">
+              <td>{{ t.index }}</td>
+              <td class="mono">{{ t.prefix }}</td>
+              <td class="mono">{{ t.masked }}</td>
+              <td><span :class="'badge '+(/游客/.test(t.prefix)?'badge-warn':'badge-info')">{{ /游客/.test(t.prefix) ? '游客' : '账号' }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="card-grid" style="margin-top: 16px" v-if="configData">
+          <div class="stat-card"><div class="label">Token 来源</div><div class="value" style="font-size:16px;margin-top:8px">{{ configData.token_source }}</div></div>
+          <div class="stat-card"><div class="label">Token 总数</div><div class="value">{{ configData.token_count }}</div></div>
+        </div>
+      </template>
+
+      <!-- ── Logs ──────────────────────────────────────────── -->
+      <template v-if="activeNav==='logs'">
+        <h2 class="section-title">实时日志</h2>
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
+          <n-button size="small" @click="fetchLogs" :loading="logsLoading">刷新</n-button>
+          <n-select v-model:value="logLevelFilter" :options="logLevelOpts" size="small" style="width:100px" placeholder="全部级别" clearable />
+          <n-switch v-model:value="logsAutoRefresh" size="small" /> <n-text depth="3" style="font-size:12px">自动刷新</n-text>
+          <n-text depth="3" style="font-size:12px;margin-left:auto">{{ logs.length }} 条</n-text>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;max-height:520px;overflow-y:auto" v-if="logs.length">
+          <div class="log-line" :class="'log-level-'+l.level" v-for="l in logs" :key="l.id">
+            <span style="color:var(--muted)">{{ l.time }}</span>
+            <span :style="{color: l.level==='ERROR'?'#b91c1c':l.level==='WARNING'?'#a16207':l.level==='INFO'?'#15803d':'var(--muted)'}"> {{ l.level }}</span>
+            <span style="color:var(--muted)"> [{{ l.logger }}]</span> {{ l.msg }}
+          </div>
+        </div>
+        <div class="empty-state" v-else>暂无日志</div>
+      </template>
+
+      <!-- ── Requests ──────────────────────────────────────── -->
+      <template v-if="activeNav==='requests'">
+        <h2 class="section-title">请求记录</h2>
+        <div style="margin-bottom:12px;display:flex;gap:8px">
+          <n-button size="small" @click="fetchRequests" :loading="reqsLoading">刷新</n-button>
+          <n-button size="small" @click="clearRequests" type="error" ghost>清空</n-button>
+          <n-text depth="3" style="font-size:12px;margin-left:auto;align-self:center">{{ requests.length }} 条</n-text>
+        </div>
+        <table class="data-table" v-if="requests.length">
+          <thead><tr><th>时间</th><th>方法</th><th>路径</th><th>模型</th><th>状态</th><th>耗时</th></tr></thead>
+          <tbody>
+            <tr v-for="r in requests" :key="r.id">
+              <td class="mono">{{ r.time }}</td>
+              <td>{{ r.method }}</td>
+              <td class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{{ r.path }}</td>
+              <td class="mono">{{ r.model || '--' }}</td>
+              <td><span :class="'badge '+(r.status<300?'badge-ok':r.status<400?'badge-warn':'badge-err')">{{ r.status }}</span></td>
+              <td>{{ r.duration_ms }}ms</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="empty-state" v-else>暂无请求记录</div>
+      </template>
+
+      <!-- ── Chat Test ─────────────────────────────────────── -->
+      <template v-if="activeNav==='chat'">
+        <h2 class="section-title">对话测试</h2>
+        <n-space vertical size="medium" style="max-width:560px">
+          <n-select v-model:value="chatModel" :options="modelOptions" placeholder="选择模型" />
+          <n-input v-model:value="chatPrompt" type="textarea" :rows="3" placeholder="输入提示词..." />
+          <n-button type="primary" @click="doChatTest" :loading="chatLoading">发送</n-button>
+          <n-card v-if="chatResult" size="small" :bordered="true">
+            <template #header><n-text depth="3">模型 {{ chatResult.model || chatModel }} · {{ chatResult.ok ? '成功' : '失败' }}</n-text></template>
+            <n-text v-if="chatResult.ok" style="white-space:pre-wrap;font-size:14px">{{ chatResult.reply }}</n-text>
+            <n-text v-else type="error">{{ chatResult.info }}</n-text>
+          </n-card>
+        </n-space>
+      </template>
+    </main>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, onUnmounted, watch } = Vue;
+const { NButton, NInput, NSelect, NSpace, NH3, NText, NCard, NSwitch, NModal, NTag } = na;
+
+const app = createApp({
+  components: { NButton, NInput, NSelect, NSpace, NH3, NText, NCard, NSwitch, NModal, NTag },
+  setup() {
+    const authenticated = ref(false);
+    const loginKey = ref('');
+    const loginLoading = ref(false);
+    const loginError = ref('');
+    const activeNav = ref('overview');
+    const navs = [
+      { id: 'overview', label: '概览', icon: '◉' },
+      { id: 'config', label: '配置', icon: '⚙' },
+      { id: 'tokens', label: 'Token', icon: '🔑' },
+      { id: 'api-keys', label: 'API Key', icon: '🔐' },
+      { id: 'logs', label: '日志', icon: '📋' },
+      { id: 'requests', label: '请求记录', icon: '📊' },
+      { id: 'chat', label: '对话测试', icon: '💬' },
+    ];
+
+    const overview = ref({});
+    const configData = ref(null);
+    const logs = ref([]);
+    const logsLoading = ref(false);
+    const logsAutoRefresh = ref(true);
+    const logLevelFilter = ref(null);
+    const logLevelOpts = [
+      { label: 'DEBUG', value: 'DEBUG' }, { label: 'INFO', value: 'INFO' },
+      { label: 'WARNING', value: 'WARNING' }, { label: 'ERROR', value: 'ERROR' },
+    ];
+    const requests = ref([]);
+    const reqsLoading = ref(false);
+    const chatModel = ref('glm-4-flash');
+    const chatPrompt = ref('你好，请用一句话介绍你自己');
+    const chatLoading = ref(false);
+    const chatResult = ref(null);
+    const modelOptions = ref([]);
+
+    // ── API Key management ──────────────────────────────────
+    const apiKeys = ref([]);
+    const apiKeyDialog = ref(false);
+    const apiKeyFormMode = ref('create'); // 'create' | 'edit'
+    const apiKeyFormName = ref('');
+    const apiKeyFormKey = ref('');
+    const apiKeySaving = ref(false);
+    const apiKeyError = ref('');
+
+    let logTimer = null;
+    let reqTimer = null;
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, opts);
+      if (res.status === 401 && authenticated.value) { authenticated.value = false; return null; }
+      const d = await res.json();
+      if (d.code !== 0) throw new Error(d.msg || 'API error');
+      return d.data;
+    }
+
+    async function doLogin() {
+      loginLoading.value = true; loginError.value = '';
+      try {
+        const data = await api('/admin/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: loginKey.value }) });
+        if (data !== null) { authenticated.value = true; configData.value = data; loginKey.value = ''; loadAll(); }
+      } catch (e) { loginError.value = e.message; }
+      finally { loginLoading.value = false; }
+    }
+
+    async function checkSession() {
+      try {
+        const data = await api('/admin/api/session');
+        if (data && data.authenticated) authenticated.value = true;
+      } catch (e) { /* not logged in */ }
+    }
+
+    async function doLogout() {
+      await api('/admin/api/logout', { method: 'POST' });
+      authenticated.value = false;
+    }
+
+    async function fetchOverview() {
+      try { overview.value = await api('/admin/api/overview'); } catch (e) {}
+    }
+    async function fetchConfig() {
+      try { configData.value = await api('/admin/api/config'); } catch (e) {}
+    }
+    async function fetchLogs() {
+      logsLoading.value = true;
+      try {
+        let url = '/admin/api/logs?limit=500';
+        if (logLevelFilter.value) url += '&level=' + logLevelFilter.value;
+        const data = await api(url);
+        if (data) logs.value = data.items || [];
+      } catch (e) {}
+      finally { logsLoading.value = false; }
+    }
+    async function fetchRequests() {
+      reqsLoading.value = true;
+      try {
+        const data = await api('/admin/api/requests?limit=100');
+        if (data) requests.value = data.items || [];
+      } catch (e) {}
+      finally { reqsLoading.value = false; }
+    }
+    async function clearRequests() {
+      await api('/admin/api/requests/clear', { method: 'POST' });
+      requests.value = [];
+    }
+    async function doChatTest() {
+      chatLoading.value = true; chatResult.value = null;
+      try { chatResult.value = await api('/admin/api/chat-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: chatModel.value, prompt: chatPrompt.value }) }); }
+      catch (e) { chatResult.value = { ok: false, info: e.message }; }
+      finally { chatLoading.value = false; }
+    }
+
+    // ── API Key CRUD ──────────────────────────────────────
+    async function fetchApiKeys() {
+      try { const d = await api('/admin/api/api-keys'); if (d) apiKeys.value = d.items || []; } catch (e) {}
+    }
+    function openCreateApiKey() {
+      apiKeyFormMode.value = 'create'; apiKeyFormName.value = ''; apiKeyFormKey.value = '';
+      apiKeyError.value = ''; apiKeyDialog.value = true;
+    }
+    function openEditApiKey(rec) {
+      apiKeyFormMode.value = 'edit'; apiKeyFormName.value = rec.name; apiKeyFormKey.value = '';
+      apiKeyError.value = ''; apiKeyDialog.value = true;
+    }
+    async function saveApiKey() {
+      apiKeySaving.value = true; apiKeyError.value = '';
+      try {
+        const name = apiKeyFormName.value.trim();
+        const key = apiKeyFormKey.value.trim();
+        if (apiKeyFormMode.value === 'create') {
+          await api('/admin/api/api-keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, key }) });
+        } else {
+          const body = { enabled: true };
+          if (key) body.key = key;
+          await api('/admin/api/api-keys/' + encodeURIComponent(name), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        }
+        apiKeyDialog.value = false;
+        await fetchApiKeys(); await fetchConfig();
+      } catch (e) { apiKeyError.value = e.message; }
+      finally { apiKeySaving.value = false; }
+    }
+    async function deleteApiKey(name) {
+      if (!confirm('确定删除 API Key "' + name + '"？')) return;
+      await api('/admin/api/api-keys/' + encodeURIComponent(name) + '/delete', { method: 'POST' });
+      await fetchApiKeys(); await fetchConfig();
+    }
+    async function toggleApiKey(name) {
+      await api('/admin/api/api-keys/' + encodeURIComponent(name) + '/toggle', { method: 'POST' });
+      await fetchApiKeys(); await fetchConfig();
+    }
+
+    function loadAll() { fetchOverview(); fetchConfig(); fetchLogs(); fetchRequests(); fetchApiKeys(); }
+
+    // Auto-refresh logs
+    watch(activeNav, (v) => {
+      if (logTimer) { clearInterval(logTimer); logTimer = null; }
+      if (reqTimer) { clearInterval(reqTimer); reqTimer = null; }
+      if (v === 'logs') { fetchLogs(); logTimer = setInterval(() => { if (logsAutoRefresh.value) fetchLogs(); }, 3000); }
+      if (v === 'requests') { fetchRequests(); reqTimer = setInterval(fetchRequests, 5000); }
+      if (v === 'overview') fetchOverview();
+      if (v === 'config' || v === 'tokens') fetchConfig();
+      if (v === 'api-keys') { fetchConfig(); fetchApiKeys(); }
+    });
+
+    onMounted(() => { checkSession().then(() => { if (authenticated.value) loadAll(); }); });
+    onUnmounted(() => { if (logTimer) clearInterval(logTimer); if (reqTimer) clearInterval(reqTimer); });
+
+    return {
+      authenticated, loginKey, loginLoading, loginError, doLogin, doLogout,
+      activeNav, navs, overview, configData,
+      logs, logsLoading, logsAutoRefresh, logLevelFilter, logLevelOpts, fetchLogs,
+      requests, reqsLoading, fetchRequests, clearRequests,
+      chatModel, chatPrompt, chatLoading, chatResult, doChatTest, modelOptions,
+      apiKeys, apiKeyDialog, apiKeyFormMode, apiKeyFormName, apiKeyFormKey,
+      apiKeySaving, apiKeyError, fetchApiKeys, openCreateApiKey, openEditApiKey,
+      saveApiKey, deleteApiKey, toggleApiKey,
+    };
+  }
+});
+app.mount('#app');
+</script>
+</body>
+</html>

@@ -156,6 +156,7 @@ class AppConfig:
     exposed_models: list[str]
     model_aliases: dict[str, str]
     server_api_keys: list[str]
+    admin_key: str
     cors_allow_origin: str
 
     @property
@@ -277,6 +278,7 @@ def load_config(env_file: str = ".env") -> AppConfig:
         exposed_models=exposed_models,  # type: ignore
         model_aliases=model_aliases,
         server_api_keys=parse_list(values.get("SERVER_API_KEYS")),
+        admin_key=values.get("ADMIN_KEY", "glm2api-admin").strip() or "glm2api-admin",
         cors_allow_origin=values.get("CORS_ALLOW_ORIGIN", "*").strip() or "*",
     )
 

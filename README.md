@@ -1,196 +1,389 @@
 # ChatGLM 2 API
 
-`glm2api` 是一个本地代理服务，用来把 `chatglm.cn` 的网页接口转换成 OpenAI 兼容接口，方便你直接接入 OpenAI SDK、Cherry Studio、Open WebUI、LobeChat 或其他兼容 OpenAI API 的工具。
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FXxxXTeam%2Fglm2api&env=ADMIN_KEY&envDescription=%E7%AE%A1%E7%90%86%E9%9D%A2%E6%9D%BF%E7%99%BB%E5%BD%95%E5%AF%86%E9%92%A5%EF%BC%8C%E9%BB%98%E8%AE%A4%E4%B8%BA%20glm2api-admin)
 
-支持的主要接口：
+`glm2api` 是一个**零外部依赖**的本地代理服务，把 `chatglm.cn` 的网页接口转换成 OpenAI / Anthropic 兼容接口。直接接入 OpenAI SDK、Cherry Studio、Open WebUI、LobeChat 或任何兼容 OpenAI API 的工具。
 
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
-- `POST /v1/images/generations`
-- `GET /v1/models`
-- `GET /health`
+**✨ 新特性：内置管理面板 + API Key 管理，支持一键部署到 Vercel。**
 
-## 1. 使用前准备
+---
 
-启动前请确认：
+## 支持接口
 
-- 你已经登录过 `https://chatglm.cn`
-> 其实不登陆也行,但是会有部分限制?
-- 你能获取到有效的 `refresh_token`，或者接受游客模式的能力限制
-- 本地已准备好 Python 虚拟环境
+| 端点 | 说明 |
+|------|------|
+| `POST /v1/chat/completions` | OpenAI 聊天（流式 + 非流式） |
+| `POST /v1/responses` | OpenAI Responses API |
+| `POST /v1/messages` | Anthropic Messages API 兼容 |
+| `POST /v1/images/generations` | 图片生成 |
+| `GET /v1/models` | 模型列表 |
+| `GET /health` | 健康检查 |
+| `GET /admin` | 🆕 管理面板（概览 / 配置 / Token / 日志 / 请求记录 / API Key / 对话测试） |
 
-## 2. 获取 GLM Refresh Token / 游客模式
+---
 
-获取方式：
+## 目录
 
-1. 打开 `https://chatglm.cn`
-2. 登录你的账号
-3. 按 `F12` 打开开发者工具
-4. 进入 `Application`
-5. 查看 `Local Storage` 或相关存储项
-6. 找到 `chatglm_refresh_token`
+- [快速开始](#快速开始)
+- [管理面板](#管理面板)
+- [API Key 管理](#api-key-管理)
+- [部署方式](#部署方式)
+  - [Vercel 一键部署](#vercel-一键部署)
+  - [Docker 部署](#docker-部署)
+  - [Railway / Render / Zeabur](#railway--render--zeabur)
+  - [Windows 服务](#windows-服务)
+  - [Linux systemd](#linux-systemd)
+- [配置说明](#配置说明)
+- [使用示例](#使用示例)
+- [常见问题](#常见问题)
 
-拿到后，将它填入 `.env` 文件中的：
+---
 
-```env
-GLM_REFRESH_TOKEN=你的_refresh_token
-```
+## 快速开始
 
-如果你不想登录账号，也可以直接启用游客模式：
+### 前置条件
 
-```env
-GLM_USE_GUEST_REFRESH_TOKEN=true
-```
+- Python ≥ 3.12
+- （可选）智谱清言账号的 `refresh_token`
+- **如果不填任何 token，自动走游客模式，开箱即用。**
 
-如果既没有配置 `token.txt`，也没有配置 `GLM_REFRESH_TOKEN`，程序也会自动退回游客模式，并在请求失败时自动重新获取新的游客 `refresh_token` 后重试。
-
-## 3. 配置文件
-
-先复制示例配置：
-
-```bash
-cp .env.example .env
-```
-
-如果当前目录没有 `.env`，程序启动时也会自动从 `.env.example` 复制一份默认配置再继续加载。
-
-推荐优先准备 `token.txt`，每行一个账号的 `refresh_token`：
-
-```text
-token-a
-token-b
-token-c
-```
-
-如果你暂时只有一个账号，也可以继续只改 `.env` 里的这一项：
-
-```env
-GLM_REFRESH_TOKEN=你的_refresh_token
-```
-
-如果你想显式固定走游客模式，可以这样写：
-
-```env
-GLM_USE_GUEST_REFRESH_TOKEN=true
-GLM_GUEST_MAX_RETRIES=3
-```
-
-启用游客模式后，程序会按 `GLM_MAX_CONCURRENCY` 自动创建同等数量的游客账号槽位，让每个并发请求优先使用独立游客账号，避免多个并发长期挤在同一游客会话上。
-
-常用配置说明：
-
-- `HOST`
-  服务监听地址。只给本机使用时填 `127.0.0.1`，局域网访问可填 `0.0.0.0`
-
-- `PORT`
-  服务端口，默认 `8000`
-
-- `API_PREFIX`
-  OpenAI 兼容路径前缀，默认 `/v1`
-
-- `DEBUG_DUMP_ALL`
-  调试狂暴模式。开启后会自动切到 `DEBUG`，并打印入站原始请求、转发给 GLM 的原始 body、上游原始响应和 SSE 分片、工具调用转换结果等几乎所有调试信息
-  当 LOG_LEVEL=DEBUG（或 DEBUG_DUMP_ALL=true）时，自动在 log/glm2api_debug.log 写入日志文件（LOG_LEVEL=INFO — 只有终端输出，不写文件）
-
-- `GLM_ASSISTANT_ID`
-  普通对话使用的 assistant id
-
-- `GLM_TOKEN_FILE`
-  多账号 token 文件路径，默认 `token.txt`，每行一个 `refresh_token`
-
-- `GLM_IMAGE_ASSISTANT_ID`
-  图片生成使用的 assistant id
-
-- `GLM_USE_GUEST_REFRESH_TOKEN`
-  显式启用游客 ck；开启后会忽略已配置的账号 token
-
-- `GLM_GUEST_MAX_RETRIES`
-  游客 ck 请求失败时，最多自动重新拉取游客 token 并重试多少次
-
-- `GLM_DELETE_CONVERSATION`
-  是否在请求结束后自动删除 GLM 会话记录
-
-- `GLM_MAX_CONCURRENCY`
-  本地代理允许同时占用的上游执行槽位数量，默认 `3`
-
-- `SERVER_API_KEYS`
-  如果你希望访问本地代理时也带 Bearer Token，可以在这里填写
-
-说明：
-
-- 如果存在 `token.txt`，程序会优先从这里加载多账号
-- 如果显式设置了 `GLM_USE_GUEST_REFRESH_TOKEN=true`，程序会直接走游客模式
-- 游客模式下会按 `GLM_MAX_CONCURRENCY` 自动扩展游客账号池，尽量做到每个并发槽位对应一个独立游客账号
-- 当某个账号请求失败时，会自动切换到下一账号继续尝试
-- 如果本轮所有账号都失败，下一次会从第一个账号重新开始
-- 当上游返回新的 `refresh_token` 时，多账号模式会自动写回 `token.txt` 对应行
-- 单账号兜底模式下，程序仍会自动写回 `.env`
-- 游客模式下不会把临时游客 `refresh_token` 落盘到 `.env` 或 `token.txt`
-- 如果完全没有配置账号 token，程序会自动获取游客 `refresh_token` 作为兜底
-- 如果你的 `.env` 不存在，程序无法自动落盘新的 token
-- `/v1/models` 返回的模型列表已经固定写在代码中，不再通过配置文件自定义
-
-## 4. 启动服务
-
-### 拉取源代码
+### 安装与启动
 
 ```bash
+# 1. 克隆项目
 git clone https://github.com/XxxXTeam/glm2api.git
-```
-### 安装依赖
+cd glm2api
 
-```bash
-uv sync
-```
-### 运行项目
+# 2. 安装（零外部依赖，仅需要 setuptools）
+pip install -e .
 
-```bash
-uv run .\main.py
-```
+# 3. 复制配置文件（可选，不复制也能自动创建）
+cp .env.example .env
 
-或者：
-
-```bash
-.\.venv\Scripts\python.exe main.py
+# 4. 启动
+python -m glm2api
 ```
 
-启动成功后你会看到类似日志：
+启动后访问：
+- API：`http://127.0.0.1:8000/v1/chat/completions`
+- 管理面板：`http://127.0.0.1:8000/admin`
 
-```text
-启动服务 host=127.0.0.1 port=8000 prefix=/v1 models=...
-```
+> **Windows 用户**：如果遇到编码问题，请设置环境变量 `PYTHONIOENCODING=utf-8`，或直接用 `python -m glm2api` 代替 `python main.py`。
 
-## 5. 健康检查
+### 验证服务
 
 ```bash
 curl http://127.0.0.1:8000/health
-```
+# → {"status":"ok"}
 
-返回示例：
-
-```json
-{"status":"ok"}
-```
-
-## 6. 查询模型列表
-
-```bash
 curl http://127.0.0.1:8000/v1/models
+# → 返回 78 个可用模型
 ```
 
-返回的是当前配置里暴露的模型列表。
+---
 
-## 7. 聊天接口
+## 管理面板
 
-### 7.1 Curl 示例
+内置零依赖管理面板，访问 `http://127.0.0.1:8000/admin`。
+
+### 登录
+
+默认管理员密钥：`glm2api-admin`（可在 `.env` 中通过 `ADMIN_KEY` 修改）。
+
+### 功能
+
+| 页面 | 功能 |
+|------|------|
+| **概览** | 账号数、模型数、并发上限、请求成功率统计 |
+| **配置** | 查看完整运行时配置 |
+| **Token** | 脱敏浏览各账号 token（游客 / 真实账号） |
+| **日志** | 实时日志流，支持按级别过滤、自动刷新 |
+| **请求记录** | 最近 500 条请求（方法、路径、模型、状态码、耗时） |
+| **API Key** | 增删改查 API 密钥，启用/禁用切换 |
+| **对话测试** | 一键发送聊天请求验证连通性 |
+
+### 自定义管理员密钥
+
+```env
+# .env
+ADMIN_KEY=你的自定义密钥
+```
+
+---
+
+## API Key 管理
+
+在管理面板的 **API Key** 标签页中可以添加 API 密钥，用来保护你的 glm2api 接口。
+
+### 工作原理
+
+- **默认状态**：没有 API Key 时，所有接口免认证（向后兼容）
+- **添加至少一个启用的 Key 后**：访问 `/v1/chat/completions` 等接口需要携带认证
+- **禁用或删除所有 Key 后**：恢复免认证
+
+### 使用 API Key
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="你的-api-key",  # ← 管理面板中创建的 key
+)
+
+# 或通过 x-api-key header：
+# headers = {"x-api-key": "你的-api-key"}
+```
+
+### 环境变量持久化
+
+API Key 会自动保存到 `.env` 文件的 `GLM2API_API_KEYS` 字段（JSON 格式），重启服务后自动恢复。
+
+---
+
+## 部署方式
+
+### Vercel 一键部署
+
+点击下方按钮，30 秒完成部署：
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FXxxXTeam%2Fglm2api&env=ADMIN_KEY&envDescription=%E7%AE%A1%E7%90%86%E9%9D%A2%E6%9D%BF%E7%99%BB%E5%BD%95%E5%AF%86%E9%92%A5%EF%BC%8C%E9%BB%98%E8%AE%A4%E4%B8%BA%20glm2api-admin)
+
+部署后，Vercel 会分配一个域名如 `https://你的项目.vercel.app`。
+
+**在客户端中的用法**：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://你的项目.vercel.app/v1",
+    api_key="dummy",
+)
+```
+
+**Vercel 部署注意事项**：
+- 自动启用游客模式（Vercel 环境无持久化存储）
+- SSE 流式响应可用，但受 Vercel 函数超时限制（Hobby 10s / Pro 60s）
+- 管理面板同样可用，访问 `https://你的项目.vercel.app/admin`
+- 如需设置 API Key 认证，在 Vercel 项目 Settings → Environment Variables 中添加 `GLM2API_API_KEYS`
+
+#### 手动 Vercel 部署
 
 ```bash
+# 安装 Vercel CLI
+npm i -g vercel
+
+# 部署
+cd glm2api
+vercel --prod
+```
+
+#### Vercel 环境变量参考
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `ADMIN_KEY` | 管理面板登录密钥 | `glm2api-admin` |
+| `GLM2API_API_KEYS` | API Key JSON 数组 | 空（免认证） |
+| `GLM_USE_GUEST_REFRESH_TOKEN` | 强制游客模式 | `true`（Vercel 上推荐） |
+| `GLM_MAX_CONCURRENCY` | 并发槽位数 | `3` |
+| `GLM_REFRESH_TOKEN` | 单账号 token | 空 |
+| `GLM_DELETE_CONVERSATION` | 自动删除会话 | `true` |
+
+---
+
+### Docker 部署
+
+```dockerfile
+# Dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY . /app
+
+RUN pip install -e .
+
+EXPOSE 8000
+
+CMD ["python", "-m", "glm2api"]
+```
+
+```bash
+# 构建与运行
+docker build -t glm2api .
+docker run -d -p 8000:8000 \
+  -e GLM_USE_GUEST_REFRESH_TOKEN=true \
+  -e ADMIN_KEY=your-secret-key \
+  --name glm2api \
+  glm2api
+
+# 挂载 token.txt 使用真实账号
+docker run -d -p 8000:8000 \
+  -v ./token.txt:/app/token.txt \
+  -v ./.env:/app/.env \
+  --name glm2api \
+  glm2api
+```
+
+```bash
+# docker-compose.yml
+version: "3.8"
+services:
+  glm2api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - GLM_USE_GUEST_REFRESH_TOKEN=true
+      - ADMIN_KEY=glm2api-admin
+    restart: unless-stopped
+```
+
+---
+
+### Railway / Render / Zeabur
+
+这些平台通用部署方式：
+
+1. Fork / Clone 本项目到你的 GitHub
+2. 在平台中选择 "Deploy from GitHub"
+3. Build command：`pip install -e .`
+4. Start command：`python -m glm2api`
+5. 添加环境变量（参考上方 Vercel 环境变量表）
+
+**Railway 示例配置**：
+
+```toml
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -e ."
+
+[deploy]
+startCommand = "python -m glm2api"
+
+[service]
+port = 8000
+```
+
+---
+
+### Windows 服务
+
+使用 NSSM (Non-Sucking Service Manager) 注册为 Windows 服务：
+
+```powershell
+# 下载 NSSM: https://nssm.cc/download
+nssm install glm2api
+
+# 配置：
+# Application: C:\Program Files\Python312\python.exe
+# Arguments: -m glm2api
+# Start directory: C:\path\to\glm2api
+# Environment: PYTHONIOENCODING=utf-8
+
+nssm start glm2api
+```
+
+---
+
+### Linux systemd
+
+```ini
+# /etc/systemd/system/glm2api.service
+[Unit]
+Description=glm2api - GLM to OpenAI API Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=glm2api
+WorkingDirectory=/opt/glm2api
+Environment="PYTHONIOENCODING=utf-8"
+Environment="GLM_USE_GUEST_REFRESH_TOKEN=true"
+ExecStart=/usr/bin/python3 -m glm2api
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now glm2api
+sudo systemctl status glm2api
+```
+
+---
+
+## 配置说明
+
+### 获取 GLM Refresh Token
+
+1. 打开 `https://chatglm.cn` 并登录
+2. 按 `F12` → `Application` → `Local Storage`
+3. 找到 `chatglm_refresh_token`
+4. 填入 `.env`：`GLM_REFRESH_TOKEN=你的token`
+
+**如果不填**：自动启用游客模式，零配置即可使用。
+
+### 多账号负载均衡
+
+创建 `token.txt`，每行一个 `refresh_token`：
+
+```text
+token-account-1
+token-account-2
+token-account-3
+```
+
+程序会自动在多个账号间轮换，某个账号失败时自动切换到下一个。
+
+### 完整配置项
+
+| 变量 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `HOST` | str | `127.0.0.1` | 监听地址，局域网用 `0.0.0.0` |
+| `PORT` | int | `8000` | 监听端口 |
+| `API_PREFIX` | str | `/v1` | OpenAI 兼容路径前缀 |
+| `LOG_LEVEL` | str | `INFO` | 日志级别：DEBUG / INFO / WARNING / ERROR |
+| `DEBUG_DUMP_ALL` | bool | `false` | 调试狂暴模式 |
+| `REQUEST_TIMEOUT_SECONDS` | int | `120` | 上游请求超时 |
+| `GLM_REFRESH_TOKEN` | str | — | 单账号 refresh_token |
+| `GLM_TOKEN_FILE` | str | `token.txt` | 多账号 token 文件路径 |
+| `GLM_USE_GUEST_REFRESH_TOKEN` | bool | `false` | 强制游客模式 |
+| `GLM_GUEST_MAX_RETRIES` | int | `3` | 游客 token 获取失败重试次数 |
+| `GLM_MAX_CONCURRENCY` | int | `3` | 上游并发槽位数量 |
+| `GLM_QUEUE_WAIT_TIMEOUT_SECONDS` | int | `600` | 队列等待超时 |
+| `GLM_BUSY_MAX_RETRIES` | int | `30` | 上游忙碌时重试次数 |
+| `GLM_DELETE_CONVERSATION` | bool | `true` | 请求结束后删除 GLM 会话 |
+| `GLM_ASSISTANT_ID` | str | `65940acff94777010aa6b796` | 对话 assistant id |
+| `GLM_IMAGE_ASSISTANT_ID` | str | `65a232c082ff90a2ad2f15e2` | 绘图 assistant id |
+| `BLOCKED_TOOL_NAMES` | str | — | 工具黑名单（逗号分隔） |
+| `ADMIN_KEY` | str | `glm2api-admin` | 🆕 管理面板登录密钥 |
+| `GLM2API_API_KEYS` | str | — | 🆕 API Key JSON 数组 |
+| `SERVER_API_KEYS` | str | — | 旧版 API Key（逗号分隔） |
+| `CORS_ALLOW_ORIGIN` | str | `*` | CORS 允许来源 |
+
+---
+
+## 使用示例
+
+### Curl
+
+```bash
+# 聊天
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d "{\"model\":\"glm-4\",\"messages\":[{\"role\":\"user\",\"content\":\"你好，介绍一下你自己\"}]}"
+  -d '{"model":"glm-4-flash","messages":[{"role":"user","content":"你好"}]}'
+
+# 图片生成
+curl http://127.0.0.1:8000/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{"model":"glm-image-1","prompt":"画个枫叶","size":"1024x1024"}'
 ```
 
-### 7.2 Python OpenAI SDK 示例
+### Python (OpenAI SDK)
 
 ```python
 from openai import OpenAI
@@ -200,146 +393,122 @@ client = OpenAI(
     api_key="dummy",
 )
 
+# 非流式
 resp = client.chat.completions.create(
     model="glm-4",
-    messages=[
-        {"role": "user", "content": "你好，介绍一下你自己"}
-    ],
+    messages=[{"role": "user", "content": "你好，介绍一下你自己"}],
 )
-
 print(resp.choices[0].message.content)
-```
 
-### 7.3 流式示例
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",
-    api_key="dummy",
-)
-
+# 流式
 stream = client.chat.completions.create(
     model="glm-4",
     messages=[{"role": "user", "content": "写一首七言绝句"}],
     stream=True,
 )
-
 for chunk in stream:
-    delta = chunk.choices[0].delta
-    if getattr(delta, "content", None):
-        print(delta.content, end="")
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
 ```
 
-### 7.4 OpenAI Responses API 示例
+### Python (Responses API)
 
 ```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",
-    api_key="dummy",
-)
-
 resp = client.responses.create(
     model="glm-4",
-    input=[
-        {"role": "user", "content": "你好，介绍一下你自己"}
-    ],
+    input=[{"role": "user", "content": "你好"}],
 )
-
 print(resp.output_text)
 ```
 
-## 8. 图片生成接口
-
-### 8.1 Curl 示例
-
-```bash
-curl http://127.0.0.1:8000/v1/images/generations \
-  -H "Content-Type: application/json" \
-  -d "{\"model\":\"glm-image-1\",\"prompt\":\"画个枫叶\",\"size\":\"1024x1024\"}"
-```
-
-### 8.2 Python OpenAI SDK 示例
+### Python (图片生成)
 
 ```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",
-    api_key="dummy",
-)
-
 image = client.images.generate(
     model="glm-image-1",
     prompt="画个枫叶",
     size="1024x1024",
 )
-
 print(image.data[0].url)
 ```
 
-### 8.3 当前支持的图片参数
+### Anthropic SDK 兼容
 
-- `prompt`
-- `model`
-- `n`
-- `size`
-- `response_format`
-- `style`
-- `scene`
+```python
+# glm2api 支持 /v1/messages 端点，兼容 Anthropic Messages 格式
+import requests
 
-说明：
-
-- 默认返回图片 URL
-- 如果 `response_format=b64_json`，会返回 base64 图片数据
-- `size` 会自动映射到 GLM 所需的宽高比例
-
-## 9. 鉴权方式
-
-如果 `.env` 中 `SERVER_API_KEYS` 为空，则本地接口默认不校验 Bearer Token。
-
-如果你配置了：
-
-```env
-SERVER_API_KEYS=sk-local-1,sk-local-2
+resp = requests.post(
+    "http://127.0.0.1:8000/v1/messages",
+    headers={"x-api-key": "dummy", "Content-Type": "application/json"},
+    json={
+        "model": "glm-4",
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": "Hello"}],
+    },
+)
 ```
 
-那么请求时需要带：
+---
 
-```http
-Authorization: Bearer sk-local-1
+## 常见问题
+
+### 启动报错 `GLM_REFRESH_TOKEN` 缺失
+
+**新版本默认自动退回游客模式**，无需填写。如果你想使用账号，请检查 `.env` 或 `token.txt`。
+
+### 返回「请等待其他对话生成完毕」
+
+GLM 侧存在并发限制，程序内置了串行队列和自动重试（默认重试 30 次）。可通过 `GLM_BUSY_MAX_RETRIES` 和 `GLM_BUSY_RETRY_INTERVAL_SECONDS` 调整。
+
+### 返回「请登录后继续使用」
+
+账号 token 已失效，需要重新登录 `https://chatglm.cn` 获取新的 `refresh_token`。
+
+### Windows 下启动报 `UnicodeEncodeError`
+
+设置环境变量后启动：
+```powershell
+$env:PYTHONIOENCODING="utf-8"
+python -m glm2api
 ```
 
-## 10. 日志说明
+### Vercel 部署后流式响应不工作
 
-程序默认输出彩色日志，常见内容包括：
+Vercel Hobby 计划的函数超时限制为 10 秒，长回答可能会被截断。升级到 Pro 计划（60 秒）或使用本地 / Docker 部署。
 
-- 服务启动
-- 请求进入队列
-- 并发槽位获取/释放
-- 上游请求转发
-- 会话删除结果
-- 错误原因
+---
 
-如果你想查看更多细节，可以把 `.env` 中的：
+## 项目架构
 
-```env
-LOG_LEVEL=DEBUG
+```
+src/glm2api/
+├── __init__.py          # 版本声明
+├── __main__.py          # CLI 入口
+├── app.py               # 应用生命周期管理
+├── config.py            # 配置加载与校验
+├── logging_utils.py     # 彩色日志 + 内存缓冲
+├── model_variants.py    # 模型变体展开 (think/search)
+├── model_profiles.py    # 模型配置档
+├── server.py            # HTTP 路由 + SSE 流式 + 请求记录
+├── admin.py             # 🆕 管理面板 API + API Key 存储
+├── admin_static/
+│   └── index.html       # 🆕 Vue 3 + Naive UI 管理面板 SPA
+├── services/
+│   ├── glm_client.py    # GLM Web API 客户端 + 并发队列
+│   ├── glm_auth.py      # 认证管理 (refresh / guest token)
+│   ├── translator.py    # GLM → OpenAI 格式转换
+│   ├── anthropic_adapter.py  # Anthropic 适配器
+│   └── responses_adapter.py  # Responses API 适配器
+└── utils/
+    ├── tool_parser.py   # 工具调用流式解析器
+    └── tool_protocol.py # 工具协议常量
 ```
 
-## 11. 常见问题
+**设计原则**：零外部依赖（纯 Python stdlib），`ThreadingHTTPServer` 处理 HTTP，`urllib.request` 发起上游请求。
 
-### 11.1 启动时报 `GLM_REFRESH_TOKEN` 缺失
+---
 
-新版本默认会自动退回游客模式；如果你仍想固定使用账号，请检查 `.env` 或 `token.txt` 里的 `refresh_token` 是否填写正确。
+## License
 
-### 11.2 返回“请等待其他对话生成完毕”
-
-说明同一账号在 GLM 侧存在并发限制。程序已经内置串行队列和自动等待重试。
-
-### 11.3 返回“请登录后继续使用”
-
-说明当前账号状态无效，或者 token 已失效，需要重新登录并更新 `refresh_token`
+[AGPL-3.0](LICENSE)

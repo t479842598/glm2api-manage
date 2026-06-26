@@ -1,0 +1,14 @@
+.git
+.lrnev
+.reasonix
+.pytest_cache
+.venv
+__pycache__
+*.pyc
+log
+docs
+main.spec
+tokenizer.json
+.env
+token.txt
+tests
