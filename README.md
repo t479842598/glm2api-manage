@@ -6,6 +6,10 @@
 
 ## 📢 更新日志
 
+### 2026-06-26 — v0.2.1 修复流式响应中途报错
+
+- **修复流式请求中途报 `GLM part status error`** — GLM 的 SSE 流中，单个 part（如 reasoning 段）可能以 `status: "error"` 结束，但 event 级别状态仍为 `finish`，之前会错误地中断整个流，现在只在 event 级别确实为 error 时才中断
+
 ### 2026-06-26 — v0.2.0 管理面板大升级
 
 - **修复管理面板白屏** — 抛弃 CDN 依赖，Vue 3 + Naive UI 改为本地加载，登录框用原生 HTML

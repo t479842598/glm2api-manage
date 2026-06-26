@@ -282,15 +282,26 @@ class GLMWebClient:
         parts = event.get("parts")
         if not isinstance(parts, list):
             return None
+        event_status = str(event.get("status", "")).strip().lower()
+        # First pass: check for explicit error dicts in parts
         for part in parts:
             if not isinstance(part, dict):
                 continue
             error = part.get("error")
             if isinstance(error, dict) and error:
                 return error
-            part_status = str(part.get("status", "")).strip().lower()
-            if part_status == "error":
-                return {"message": "GLM part status error"}
+        # Second pass: only treat part status "error" as fatal when the
+        # event-level status is also "error" (or absent).  GLM may mark
+        # individual parts (e.g. a reasoning segment) with status "error"
+        # when they finish or get interrupted, while other parts and the
+        # overall event are still fine.
+        if event_status in ("error", ""):
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                part_status = str(part.get("status", "")).strip().lower()
+                if part_status == "error":
+                    return {"message": "GLM part status error"}
         return None
 
     def delete_conversation(self, conversation_id: str, assistant_id: str | None = None) -> None:
